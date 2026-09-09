@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0b0b" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Club Burger" />
+  <title>Club Burger · Dueño</title>
+  <link rel="icon" href="assets/favicon.ico" />
+  <link rel="apple-touch-icon" href="assets/logo.png" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="login" class="pantalla">
+    <img class="logo-login" src="assets/logo.png" alt="Club Burger" />
+    <p class="eyebrow">Desde cualquier lugar</p>
+    <h1>Panel del dueño</h1>
+    <p class="lead corto">Entra con el correo del dueño. Los datos salen del computador del restaurante, en vivo.</p>
+    <form id="login-form" class="login-form">
+      <input id="email" type="email" autocomplete="username" placeholder="Correo" required />
+      <input id="password" type="password" autocomplete="current-password" placeholder="Contraseña" required />
+      <button type="submit" class="btn-cobrar">Entrar</button>
+    </form>
+    <p id="login-error" class="error" hidden></p>
+  </div>
+
+  <div id="panel" class="pantalla con-tabs" hidden>
+    <header class="top">
+      <div class="brand">
+        <img src="assets/logo.png" alt="" />
+        <div>
+          <strong>Club Burger</strong>
+          <span id="live-label" class="live">En vivo</span>
+        </div>
+      </div>
+      <button type="button" id="salir" class="link">Salir</button>
+    </header>
+
+    <p id="pc-banner" class="alerta-stock" hidden></p>
+
+    <div id="vista-caja">
+      <button type="button" id="alerta-stock" class="alerta-stock" hidden></button>
+      <section id="caja-card" class="caja-card">
+        <div>
+          <p id="caja-estado" class="badge">Caja</p>
+          <h2 id="quien">—</h2>
+          <p id="caja-desde" class="muted">—</p>
+        </div>
+        <p id="capital" class="muted mini">—</p>
+      </section>
+      <section class="hero">
+        <p class="muted">Total de la caja actual</p>
+        <p id="total-caja" class="money">$ 0</p>
+        <p id="items-caja" class="muted">Sin ventas en esta caja</p>
+      </section>
+      <section>
+        <h3>Hoy</h3>
+        <div class="fila">
+          <article class="stat"><span>Vendido hoy</span><strong id="total-hoy">$ 0</strong></article>
+          <article class="stat"><span>Ítems hoy</span><strong id="items-hoy">0</strong></article>
+        </div>
+      </section>
+      <section>
+        <h3 id="metodos-titulo">Por método de pago</h3>
+        <div id="metodos" class="metodos"></div>
+      </section>
+      <section>
+        <h3>Más vendidos</h3>
+        <div id="top" class="lista"></div>
+      </section>
+      <section>
+        <h3>Últimas ventas</h3>
+        <div id="feed" class="lista"></div>
+      </section>
+    </div>
+
+    <div id="vista-inventario" hidden>
+      <section class="hero mini-hero">
+        <p class="muted">Inventario en vivo</p>
+        <p id="inv-resumen" class="money small">0 productos</p>
+        <p id="inv-umbral" class="muted">Alerta si quedan 5 o menos</p>
+      </section>
+      <div class="fila tres">
+        <article class="stat"><span>Agotados</span><strong id="n-agotados" class="txt-off">0</strong></article>
+        <article class="stat"><span>Bajos</span><strong id="n-bajos" class="txt-gold">0</strong></article>
+        <article class="stat"><span>Ok</span><strong id="n-ok" class="txt-ok">0</strong></article>
+      </div>
+      <input id="buscar" class="buscar" type="search" placeholder="Buscar producto" autocomplete="off" />
+      <div id="filtros" class="chips"></div>
+      <div id="inv-lista" class="lista"></div>
+    </div>
+
+    <div id="vista-vender" hidden>
+      <p id="vender-bloque" class="vacio" hidden></p>
+      <div id="vender-ok">
+        <section class="hero mini-hero">
+          <p class="muted">Facturar e imprimir en el local</p>
+          <p id="total-carrito" class="money small">$ 0</p>
+          <p id="carrito-resumen" class="muted">Sin productos</p>
+        </section>
+        <input id="buscar-venta" class="buscar" type="search" placeholder="Buscar para vender" autocomplete="off" />
+        <div id="catalogo" class="lista"></div>
+        <div id="carrito" class="lista"></div>
+        <h3>Método de pago</h3>
+        <div id="metodos-venta" class="chips"></div>
+        <div id="efectivo-box" hidden>
+          <label class="muted mini" for="recibido">Recibido</label>
+          <input id="recibido" class="buscar" inputmode="numeric" placeholder="Ej: 20000" />
+          <p id="cambio" class="muted">Cambio: $ 0</p>
+        </div>
+        <button type="button" id="cobrar" class="btn-cobrar" disabled>Cobrar e imprimir</button>
+        <p id="venta-msg" class="error" hidden></p>
+        <p id="venta-ok" class="ok-msg" hidden></p>
+      </div>
+    </div>
+
+    <p id="pie" class="pie">Actualizado —</p>
+    <nav class="tabs tabs-3" id="tabs">
+      <button type="button" data-tab="caja" class="activo">Caja</button>
+      <button type="button" data-tab="inventario">Inventario <span id="inv-badge" class="tab-badge" hidden>0</span></button>
+      <button type="button" data-tab="vender">Vender <span id="cart-badge" class="tab-badge oro" hidden>0</span></button>
+    </nav>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
