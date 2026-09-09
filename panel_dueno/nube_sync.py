@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from auth_pos import clave_auth, email_pos
 from snapshot import db_path, _connect, _rows
 from ticket import _printer_name
 from ventas import VentaError, registrar_venta
@@ -143,6 +147,95 @@ def _filas_sqlite() -> dict[str, list[dict[str, Any]]]:
         conn.close()
 
 
+def _auth_admin(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
+    url, key = credenciales_nube()
+    datos = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(
+        f"{url.rstrip('/')}/auth/v1{path}",
+        data=datos,
+        headers={
+            "Authorization": f"Bearer {key}",
+            "apikey": key,
+            "Content-Type": "application/json",
+        },
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=25) as resp:
+        raw = resp.read()
+        return json.loads(raw.decode("utf-8")) if raw else None
+
+
+def _firma_usuarios() -> str:
+    conn = _connect()
+    try:
+        filas = _rows(conn, "SELECT usuario, rol, contrasena FROM usuarios ORDER BY id")
+    except Exception:
+        return ""
+    finally:
+        conn.close()
+    partes = [f"{r['usuario']}|{r['rol']}|{r['contrasena']}" for r in filas]
+    return hashlib.sha256("\n".join(partes).encode("utf-8")).hexdigest()
+
+
+def sincronizar_usuarios_pos(sync: dict[str, Any]) -> None:
+    """Crea/actualiza en Supabase Auth las mismas cuentas del POS (usuario + contraseña)."""
+    firma = _firma_usuarios()
+    if not firma or sync.get("firma_usuarios") == firma:
+        return
+    conn = _connect()
+    try:
+        filas = _rows(conn, "SELECT usuario, rol, contrasena FROM usuarios")
+    finally:
+        conn.close()
+    existentes: dict[str, str] = {}
+    page = 1
+    while page <= 10:
+        lista = _auth_admin("GET", f"/admin/users?page={page}&per_page=200") or {}
+        users = lista.get("users") if isinstance(lista, dict) else lista
+        if not users:
+            break
+        for user in users:
+            email = str((user or {}).get("email") or "").lower()
+            uid = str((user or {}).get("id") or "")
+            if email and uid:
+                existentes[email] = uid
+        if len(users) < 200:
+            break
+        page += 1
+    hubo_error = False
+    for fila in filas:
+        usuario = str(fila["usuario"] or "").strip()
+        if not usuario:
+            continue
+        email = email_pos(usuario)
+        rol = str(fila["rol"] or "cajero").strip() or "cajero"
+        payload = {
+            "email": email,
+            "password": clave_auth(str(fila["contrasena"] or "")),
+            "email_confirm": True,
+            "user_metadata": {"usuario": usuario, "rol": rol, "pos": True},
+        }
+        uid = existentes.get(email.lower())
+        try:
+            if uid:
+                _auth_admin(
+                    "PUT",
+                    f"/admin/users/{uid}",
+                    {
+                        "password": payload["password"],
+                        "email_confirm": True,
+                        "user_metadata": payload["user_metadata"],
+                    },
+                )
+            else:
+                _auth_admin("POST", "/admin/users", payload)
+        except urllib.error.HTTPError:
+            hubo_error = True
+            continue
+    if not hubo_error:
+        sync["firma_usuarios"] = firma
+
+
 def subir_estado(payload: dict[str, Any]) -> None:
     client = _cliente()
     if client is None:
@@ -228,6 +321,10 @@ def ciclo_nube(obtener_payload) -> str:
     sync = _cargar_estado_sync()
     try:
         procesados = procesar_pedidos_remotos()
+        try:
+            sincronizar_usuarios_pos(sync)
+        except Exception as exc:
+            sync["ultimo_error_auth"] = str(exc)[:200]
         payload = obtener_payload()
         firma = str(payload.get("firma") or "")
         ahora_ts = time.time()

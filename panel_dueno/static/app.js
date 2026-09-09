@@ -6,7 +6,6 @@ const dinero = new Intl.NumberFormat("es-CO", {
 
 const loginEl = document.getElementById("login");
 const panelEl = document.getElementById("panel");
-const pinDisplay = document.getElementById("pin-display");
 const loginError = document.getElementById("login-error");
 const metodosEl = document.getElementById("metodos");
 const topEl = document.getElementById("top");
@@ -16,12 +15,13 @@ const filtrosEl = document.getElementById("filtros");
 const alertaStockEl = document.getElementById("alerta-stock");
 const buscarEl = document.getElementById("buscar");
 
-let pin = "";
 let token = sessionStorage.getItem("cb_token") || "";
 let socket = null;
 let poll = null;
 let ultimaFirma = "";
+let ultimoEstado = null;
 let tabActual = "caja";
+let diaReporte = "";
 let filtroInv = "todos";
 let inventario = { productos: [], categorias: [], umbral: 5, atencion: 0, agotados: 0, bajos: 0, ok: 0, total: 0 };
 let carrito = {};
@@ -29,6 +29,17 @@ let metodoPago = "Efectivo";
 let metodosPago = ["Efectivo", "Nequi", "Daviplata", "Transferencia", "Tarjeta"];
 let puedeVender = false;
 let cobrando = false;
+
+function aplicarPoliticas(sesion) {
+  const admin = Boolean(sesion?.es_admin);
+  const btn = document.querySelector('#tabs button[data-tab="reporte"]');
+  if (btn) btn.hidden = !admin;
+  const etiqueta = document.getElementById("quien-sesion");
+  if (etiqueta) {
+    etiqueta.textContent = sesion?.usuario ? `${sesion.usuario}${admin ? " · admin" : " · cajero"}` : "";
+  }
+  if (!admin && tabActual === "reporte") cambiarTab("caja");
+}
 
 function esc(texto) {
   return String(texto ?? "")
@@ -38,22 +49,27 @@ function esc(texto) {
     .replace(/"/g, "&quot;");
 }
 
-function pintarPin() {
-  pinDisplay.textContent = pin.length ? pin.replace(/./g, "•").padEnd(6, "•") : "••••••";
-}
-
-function tecla(valor) {
+document.getElementById("login-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
   loginError.hidden = true;
-  if (valor === "c") pin = "";
-  else if (valor === "b") pin = pin.slice(0, -1);
-  else if (pin.length < 6) pin += valor;
-  pintarPin();
-  if (pin.length === 6) entrar();
-}
-
-document.getElementById("pad").addEventListener("click", (ev) => {
-  const boton = ev.target.closest("button[data-k]");
-  if (boton) tecla(boton.dataset.k);
+  try {
+    const res = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        usuario: document.getElementById("usuario").value,
+        contrasena: document.getElementById("contrasena").value,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Usuario o contraseña incorrectos");
+    token = data.token;
+    sessionStorage.setItem("cb_token", token);
+    mostrarPanel();
+  } catch (err) {
+    loginError.hidden = false;
+    loginError.textContent = err.message || "No se pudo entrar";
+  }
 });
 
 document.getElementById("salir").addEventListener("click", () => {
@@ -63,8 +79,6 @@ document.getElementById("salir").addEventListener("click", () => {
   clearInterval(poll);
   loginEl.hidden = false;
   panelEl.hidden = true;
-  pin = "";
-  pintarPin();
 });
 
 document.getElementById("tabs").addEventListener("click", (ev) => {
@@ -86,34 +100,13 @@ filtrosEl.addEventListener("click", (ev) => {
 
 function cambiarTab(tab) {
   tabActual = tab;
-  document.getElementById("vista-caja").hidden = tab !== "caja";
-  document.getElementById("vista-inventario").hidden = tab !== "inventario";
-  document.getElementById("vista-vender").hidden = tab !== "vender";
+  ["caja", "inventario", "vender", "reporte"].forEach((id) => {
+    const vista = document.getElementById(`vista-${id}`);
+    if (vista) vista.hidden = tab !== id;
+  });
   document.querySelectorAll("#tabs button").forEach((b) => {
     b.classList.toggle("activo", b.dataset.tab === tab);
   });
-}
-
-async function entrar() {
-  try {
-    const res = await fetch("/api/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pin }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "PIN incorrecto");
-    token = data.token;
-    sessionStorage.setItem("cb_token", token);
-    pin = "";
-    pintarPin();
-    mostrarPanel();
-  } catch (err) {
-    loginError.hidden = false;
-    loginError.textContent = err.message || "No se pudo entrar";
-    pin = "";
-    pintarPin();
-  }
 }
 
 function headers() {
@@ -159,6 +152,7 @@ function setLive(ok) {
 
 function pintar(estado) {
   if (!estado) return;
+  ultimoEstado = estado;
   const cambio = estado.firma && estado.firma !== ultimaFirma;
   ultimaFirma = estado.firma || "";
 
@@ -197,14 +191,17 @@ function pintar(estado) {
     ? `${items} ítem${items === 1 ? "" : "s"} en esta caja`
     : "Sin ventas en esta caja";
 
+  inventario = estado.inventario || inventario;
+  metodosPago = estado.metodos_pago || metodosPago;
   document.getElementById("total-hoy").textContent = dinero.format(estado.ventas_hoy?.total || 0);
   document.getElementById("items-hoy").textContent = String(estado.ventas_hoy?.items || 0);
 
-  const metodos = abierta ? estado.ventas_caja?.por_metodo : estado.ventas_hoy?.por_metodo;
   document.getElementById("metodos-titulo").textContent = abierta
     ? "Por método de pago · caja actual"
-    : "Por método de pago · hoy";
-  pintarMetodos(metodos || {});
+    : "Por método de pago · última caja";
+  pintarMetodos(mapaMetodos(estado.ventas_caja?.por_metodo));
+  pintarReporte(estado);
+  aplicarPoliticas(estado.sesion);
   pintarLista(topEl, estado.top_productos || [], (p) => ({
     titulo: p.nombre,
     sub: `${p.cantidad} vendidos`,
@@ -216,8 +213,6 @@ function pintar(estado) {
     valor: dinero.format(v.total),
   }));
 
-  inventario = estado.inventario || inventario;
-  metodosPago = estado.metodos_pago || metodosPago;
   puedeVender = Boolean(estado.puede_vender);
   pintarAlertaStock();
   pintarResumenInv();
@@ -310,14 +305,22 @@ function pintarInventario() {
     .join("");
 }
 
-function pintarMetodos(mapa) {
-  const entradas = Object.entries(mapa);
+function mapaMetodos(mapa) {
+  const out = {};
+  for (const m of metodosPago) out[m] = 0;
+  for (const [nombre, valor] of Object.entries(mapa || {})) out[nombre] = Number(valor || 0);
+  return out;
+}
+
+function pintarMetodos(mapa, destino) {
+  const el = destino || metodosEl;
+  const entradas = Object.entries(mapa || {});
   if (!entradas.length) {
-    metodosEl.innerHTML = '<p class="vacio">Todavía no hay cobros</p>';
+    el.innerHTML = '<p class="vacio">Todavía no hay cobros</p>';
     return;
   }
   const max = Math.max(...entradas.map(([, n]) => n), 1);
-  metodosEl.innerHTML = entradas
+  el.innerHTML = entradas
     .map(
       ([nombre, valor]) => `
       <article class="metodo">
@@ -329,6 +332,74 @@ function pintarMetodos(mapa) {
       </article>`
     )
     .join("");
+}
+
+function pintarReporte(estado) {
+  const reporte = estado.reporte;
+  const diasEl = document.getElementById("rep-dias");
+  if (!reporte || !diasEl) return;
+  const dias = reporte.dias || [];
+  if (!diaReporte || !dias.some((d) => d.fecha === diaReporte)) {
+    diaReporte = reporte.hoy?.fecha || dias[0]?.fecha || "";
+  }
+  const dia = dias.find((d) => d.fecha === diaReporte) || reporte.hoy;
+  if (!dia) return;
+  diasEl.innerHTML = dias
+    .slice(0, 14)
+    .map(
+      (d) =>
+        `<button type="button" data-dia="${esc(d.fecha)}" class="${d.fecha === dia.fecha ? "activo" : ""}">${esc(
+          d.es_hoy ? "Hoy" : d.etiqueta
+        )}</button>`
+    )
+    .join("");
+  const ventas = dia.ventas || {};
+  document.getElementById("rep-total").textContent = dinero.format(ventas.total || 0);
+  document.getElementById("rep-fecha").textContent = dia.es_hoy ? `Hoy · ${dia.etiqueta}` : dia.etiqueta;
+  document.getElementById("rep-efectivo").textContent = dinero.format(ventas.efectivo || 0);
+  document.getElementById("rep-otros").textContent = dinero.format(ventas.otros_medios || 0);
+  const items = ventas.items || 0;
+  document.getElementById("rep-items").textContent = items
+    ? `${items} ítem${items === 1 ? "" : "s"} vendidos`
+    : "Sin ventas ese día";
+  pintarMetodos(mapaMetodos(ventas.por_metodo), document.getElementById("rep-metodos"));
+
+  const sesionesEl = document.getElementById("rep-sesiones");
+  const sesiones = dia.sesiones || [];
+  if (!sesiones.length) {
+    sesionesEl.innerHTML = '<p class="vacio">No hubo caja ese día</p>';
+  } else {
+    sesionesEl.innerHTML = sesiones
+      .map((s) => {
+        const avisos = [];
+        if (s.alerta) avisos.push(s.alerta);
+        if (s.capital_final != null && Math.abs(s.diferencia_efectivo || 0) >= 1) {
+          avisos.push(
+            `Efectivo contado ${dinero.format(s.capital_final)} vs esperado ${dinero.format(s.efectivo_esperado)} (capital inicial + ventas en efectivo).`
+          );
+        }
+        return `<article class="cuadre fila-item">
+          <div>
+            <div class="prod">${s.abierta ? "Caja abierta" : "Caja cerrada"} · ${esc(s.usuario)}</div>
+            <div class="muted mini">${esc(s.desde)}${s.hora_cierre ? ` → ${esc(s.hora_cierre)}` : ""}</div>
+            <p class="muted mini">Capital inicial ${dinero.format(s.capital_inicial || 0)}</p>
+            <p class="muted mini">Ventas ${dinero.format(s.ventas?.total || 0)}${s.total_pos != null ? ` · POS ${dinero.format(s.total_pos)}` : ""}</p>
+            <p class="muted mini">Efectivo esperado ${dinero.format(s.efectivo_esperado || 0)}${s.capital_final != null ? ` · contado ${dinero.format(s.capital_final)}` : ""}</p>
+            ${avisos.map((a) => `<p class="aviso">${esc(a)}</p>`).join("")}
+            ${!avisos.length && !s.abierta ? '<p class="aviso ok">Ventas y cierre coinciden</p>' : ""}
+          </div>
+        </article>`;
+      })
+      .join("");
+  }
+
+  const fiados = dia.fiados || {};
+  const fiadosEl = document.getElementById("rep-fiados");
+  if (!fiados.nuevos && !fiados.pagos && !fiados.pendiente) {
+    fiadosEl.textContent = "Sin fiados";
+  } else {
+    fiadosEl.textContent = `Nuevos ${dinero.format(fiados.monto_nuevo || 0)} · pagos ${dinero.format(fiados.monto_pagado || 0)} · pendiente ${dinero.format(fiados.pendiente || 0)}`;
+  }
 }
 
 function pintarLista(el, items, mapear) {
@@ -533,10 +604,15 @@ document.getElementById("metodos-venta").addEventListener("click", (ev) => {
 document.getElementById("buscar-venta").addEventListener("input", () => pintarVender());
 document.getElementById("recibido").addEventListener("input", actualizarCambio);
 document.getElementById("cobrar").addEventListener("click", cobrar);
+document.getElementById("rep-dias").addEventListener("click", (ev) => {
+  const boton = ev.target.closest("button[data-dia]");
+  if (!boton || !ultimoEstado) return;
+  diaReporte = boton.dataset.dia;
+  pintarReporte(ultimoEstado);
+});
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/static/sw.js").catch(() => {});
 }
 
 if (token) mostrarPanel();
-else pintarPin();

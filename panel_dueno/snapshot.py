@@ -23,6 +23,8 @@ MESES = (
     "dic",
 )
 
+METODOS_CAJA = ("Efectivo", "Nequi", "Daviplata", "Transferencia", "Tarjeta")
+
 
 def db_path() -> Path:
     return Path(__file__).resolve().parent.parent / "datos_pos.db"
@@ -62,12 +64,18 @@ def _fmt_fecha(fecha: str | None, hora: str | None = None) -> str:
         return fecha
 
 
-def _agregar_metodos(filas: list[sqlite3.Row]) -> dict[str, float]:
-    out: dict[str, float] = {}
+def _agregar_metodos(filas: list[sqlite3.Row], completar: bool = True) -> dict[str, float]:
+    out: dict[str, float] = {m: 0.0 for m in METODOS_CAJA} if completar else {}
     for fila in filas:
         metodo = (fila["metodo_pago"] or "Sin método").strip() or "Sin método"
         out[metodo] = out.get(metodo, 0.0) + float(fila["total"] or 0)
-    return dict(sorted(out.items(), key=lambda item: item[1], reverse=True))
+    orden = {nombre: i for i, nombre in enumerate(METODOS_CAJA)}
+    return dict(
+        sorted(
+            ((k, round(v, 2)) for k, v in out.items()),
+            key=lambda item: (orden.get(item[0], 99), -item[1], item[0]),
+        )
+    )
 
 
 def _nivel_stock(stock: int, inicial: int, umbral: int) -> str:
@@ -132,12 +140,129 @@ def _inventario(conn: sqlite3.Connection, ventas_hoy: list[sqlite3.Row], umbral:
 def _resumen_ventas(filas: list[sqlite3.Row]) -> dict[str, Any]:
     total = sum(float(f["total"] or 0) for f in filas)
     items = sum(int(f["cantidad"] or 0) for f in filas)
+    por_metodo = _agregar_metodos(filas)
+    efectivo = float(por_metodo.get("Efectivo") or 0)
+    digitales = round(total - efectivo, 2)
     return {
         "total": round(total, 2),
         "items": items,
         "lineas": len(filas),
-        "por_metodo": _agregar_metodos(filas),
+        "por_metodo": por_metodo,
+        "efectivo": round(efectivo, 2),
+        "otros_medios": digitales,
     }
+
+
+def _fiados_dia(conn: sqlite3.Connection, dia: str) -> dict[str, Any]:
+    vacio = {
+        "nuevos": 0,
+        "monto_nuevo": 0.0,
+        "pagos": 0,
+        "monto_pagado": 0.0,
+        "pendiente": 0.0,
+    }
+    try:
+        nuevos = _rows(conn, "SELECT * FROM fiados WHERE substr(COALESCE(fecha,''), 1, 10) = ?", (dia,))
+        pagos = _rows(conn, "SELECT * FROM pagos_fiados WHERE substr(COALESCE(fecha,''), 1, 10) = ?", (dia,))
+        pendientes = _rows(conn, "SELECT COALESCE(SUM(monto_pendiente), 0) AS t FROM fiados")
+    except sqlite3.Error:
+        return vacio
+    return {
+        "nuevos": len(nuevos),
+        "monto_nuevo": round(sum(float(f["monto_pendiente"] or 0) for f in nuevos), 2) if nuevos else 0.0,
+        "pagos": len(pagos),
+        "monto_pagado": round(sum(float(p["monto_pagado"] or 0) for p in pagos), 2) if pagos else 0.0,
+        "pendiente": round(float(pendientes[0]["t"] if pendientes else 0), 2),
+    }
+
+
+def _sesion_caja(caja: sqlite3.Row, ventas_caja: list[sqlite3.Row]) -> dict[str, Any]:
+    resumen = _resumen_ventas(ventas_caja)
+    capital = float(caja["capital_inicial"] or 0)
+    abierto = _es_vacio(caja["hora_cierre"])
+    capital_final = None if _es_vacio(caja["capital_final"]) else float(caja["capital_final"])
+    total_pos = None if _es_vacio(caja["total_ventas"]) else float(caja["total_ventas"])
+    esperado = round(capital + resumen["efectivo"], 2)
+    ventas_cuadran = total_pos is None or abs(total_pos - resumen["total"]) < 0.01
+    diferencia_efectivo = None if capital_final is None else round(capital_final - esperado, 2)
+    return {
+        "id": caja["id"],
+        "usuario": caja["usuario"] or "—",
+        "abierta": abierto,
+        "fecha": caja["fecha"],
+        "desde": _fmt_fecha(caja["fecha"], caja["hora_apertura"]),
+        "hora_apertura": caja["hora_apertura"],
+        "hora_cierre": caja["hora_cierre"],
+        "fecha_cierre": caja["fecha_cierre"],
+        "capital_inicial": capital,
+        "capital_final": capital_final,
+        "total_pos": total_pos,
+        "ventas": resumen,
+        "efectivo_esperado": esperado,
+        "diferencia_efectivo": diferencia_efectivo,
+        "ventas_cuadran": ventas_cuadran,
+        "alerta": None
+        if ventas_cuadran
+        else "El total guardado al cerrar no coincide con la suma de las ventas.",
+    }
+
+
+def _reporte_diario(
+    conn: sqlite3.Connection,
+    cajas: list[sqlite3.Row],
+    ventas_todas: list[sqlite3.Row],
+    hoy: str,
+) -> dict[str, Any]:
+    por_caja: dict[int, list[sqlite3.Row]] = {}
+    dias: set[str] = {hoy}
+    for venta in ventas_todas:
+        dia = (venta["fecha"] or "")[:10]
+        if dia:
+            dias.add(dia)
+        cid = venta["id_caja"]
+        if cid is not None:
+            por_caja.setdefault(int(cid), []).append(venta)
+    for caja in cajas:
+        dia = (caja["fecha"] or "")[:10]
+        if dia:
+            dias.add(dia)
+
+    lista = []
+    for dia in sorted(dias, reverse=True)[:31]:
+        ventas_dia = [v for v in ventas_todas if (v["fecha"] or "").startswith(dia)]
+        resumen = _resumen_ventas(ventas_dia)
+        ids_sesion = {int(c["id"]) for c in cajas if (c["fecha"] or "")[:10] == dia}
+        for venta in ventas_dia:
+            if venta["id_caja"] is not None:
+                ids_sesion.add(int(venta["id_caja"]))
+        sesiones = []
+        for caja in sorted(cajas, key=lambda c: int(c["id"])):
+            if int(caja["id"]) not in ids_sesion:
+                continue
+            sesiones.append(_sesion_caja(caja, por_caja.get(int(caja["id"]), [])))
+        lista.append(
+            {
+                "fecha": dia,
+                "etiqueta": _fmt_fecha(dia),
+                "es_hoy": dia == hoy,
+                "ventas": resumen,
+                "sesiones": sesiones,
+                "fiados": _fiados_dia(conn, dia),
+            }
+        )
+
+    hoy_rep = next((d for d in lista if d["fecha"] == hoy), None)
+    if hoy_rep is None:
+        hoy_rep = {
+            "fecha": hoy,
+            "etiqueta": _fmt_fecha(hoy),
+            "es_hoy": True,
+            "ventas": _resumen_ventas([]),
+            "sesiones": [],
+            "fiados": _fiados_dia(conn, hoy),
+        }
+        lista.insert(0, hoy_rep)
+    return {"hoy": hoy_rep, "dias": lista}
 
 
 def leer_estado(umbral: int = 5) -> dict[str, Any]:
@@ -236,6 +361,7 @@ def leer_estado(umbral: int = 5) -> dict[str, Any]:
             "top_productos": top_lista,
             "ultimas_ventas": ultimas,
             "inventario": inventario,
+            "reporte": _reporte_diario(conn, cajas, ventas_todas, hoy),
         }
     finally:
         conn.close()

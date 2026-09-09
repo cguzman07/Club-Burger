@@ -8,9 +8,8 @@ para entrar desde cualquier lugar.
 1) Supabase
    - Crea un proyecto en https://supabase.com
    - SQL Editor → pega y ejecuta: nube/supabase/schema.sql
-   - Authentication → Users → Add user
-     (correo y contraseña del dueño; confirma el email o desactiva
-     "Confirm email" en Authentication → Providers → Email)
+   - Authentication: el PC crea solo las cuentas del POS (usuario/contraseña).
+     No hace falta un correo del dueño.
    - Settings → API:
        Project URL          → SUPABASE_URL
        anon public          → SUPABASE_ANON_KEY   (Netlify)
@@ -31,13 +30,15 @@ para entrar desde cualquier lugar.
        SUPABASE_URL
        SUPABASE_ANON_KEY
    - Deploy
-   - El dueño entra a esa URL con el correo del paso 1
+   - El administrador y los cajeros entran con el usuario y contraseña del POS
 
 4) Uso diario
    PC: Club Burger.exe (cajeros, usuarios, caja, inventario)
        + Iniciar Panel Dueño.bat (sube datos e imprime pedidos)
-   Celular en el local: QR + PIN (igual que ahora)
-   Celular desde cualquier parte: web de Netlify + correo del dueño
+   Celular en el local: QR + usuario/contraseña del POS
+   Celular desde cualquier parte: web de Netlify + las mismas credenciales
+   Admin: caja, inventario, vender y reporte diario
+   Cajero: caja en vivo, inventario y facturar (sin reporte de cierre)
 
 Si se cae internet, el mostrador sigue vendiendo. Al volver, se sincroniza.
 El ticket remoto solo sale si el PC está encendido con el panel.

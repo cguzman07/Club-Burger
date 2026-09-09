@@ -11,30 +11,20 @@
   <link rel="icon" href="/static/favicon.ico" />
   <link rel="apple-touch-icon" href="/static/logo.png" />
   <link rel="manifest" href="/static/manifest.json" />
-    <link rel="stylesheet" href="/static/styles.css?v=3" />
+    <link rel="stylesheet" href="/static/styles.css?v=5" />
   </head>
   <body>
   <div id="login" class="pantalla">
     <img class="logo-login" src="/static/logo.png" alt="Club Burger" />
     <p class="eyebrow">Caja en vivo</p>
-    <h1>Panel del dueño</h1>
-    <p class="lead corto">Ingresa el PIN que aparece en el computador del restaurante.</p>
-    <div id="pin-display" class="pin-display" aria-live="polite">••••••</div>
+    <h1>Club Burger</h1>
+    <p class="lead corto">Entra con el mismo usuario y contraseña del computador.</p>
+    <form id="login-form" class="login-form">
+      <input id="usuario" type="text" autocomplete="username" placeholder="Usuario" required />
+      <input id="contrasena" type="password" autocomplete="current-password" placeholder="Contraseña" required />
+      <button type="submit" class="btn-cobrar">Entrar</button>
+    </form>
     <p id="login-error" class="error" hidden></p>
-    <div class="pad" id="pad">
-      <button type="button" data-k="1">1</button>
-      <button type="button" data-k="2">2</button>
-      <button type="button" data-k="3">3</button>
-      <button type="button" data-k="4">4</button>
-      <button type="button" data-k="5">5</button>
-      <button type="button" data-k="6">6</button>
-      <button type="button" data-k="7">7</button>
-      <button type="button" data-k="8">8</button>
-      <button type="button" data-k="9">9</button>
-      <button type="button" data-k="c" class="ghost">C</button>
-      <button type="button" data-k="0">0</button>
-      <button type="button" data-k="b" class="ghost">⌫</button>
-    </div>
   </div>
 
   <div id="panel" class="pantalla con-tabs" hidden>
@@ -44,6 +34,7 @@
         <div>
           <strong>Club Burger</strong>
           <span id="live-label" class="live">En vivo</span>
+          <span id="quien-sesion" class="muted mini"></span>
         </div>
       </div>
       <button type="button" id="salir" class="link">Salir</button>
@@ -122,6 +113,32 @@
       <div id="inv-lista" class="lista"></div>
     </div>
 
+    <div id="vista-reporte" hidden>
+      <section class="hero mini-hero">
+        <p class="muted">Reporte del día</p>
+        <p id="rep-total" class="money small">$ 0</p>
+        <p id="rep-fecha" class="muted">—</p>
+      </section>
+      <div id="rep-dias" class="chips"></div>
+      <div class="fila">
+        <article class="stat"><span>Efectivo</span><strong id="rep-efectivo">$ 0</strong></article>
+        <article class="stat"><span>Nequi y otros</span><strong id="rep-otros">$ 0</strong></article>
+      </div>
+      <p id="rep-items" class="muted mini">Sin ventas</p>
+      <section>
+        <h3>Por método de pago</h3>
+        <div id="rep-metodos" class="metodos"></div>
+      </section>
+      <section>
+        <h3>Cuadre de caja</h3>
+        <div id="rep-sesiones" class="lista"></div>
+      </section>
+      <section>
+        <h3>Fiados</h3>
+        <p id="rep-fiados" class="muted">Sin fiados</p>
+      </section>
+    </div>
+
     <div id="vista-vender" hidden>
       <p id="vender-bloque" class="vacio" hidden>Abre la caja en el computador para facturar desde el celular.</p>
       <div id="vender-ok">
@@ -148,7 +165,7 @@
 
     <p id="pie" class="pie">Actualizado —</p>
 
-    <nav class="tabs tabs-3" id="tabs">
+    <nav class="tabs tabs-4" id="tabs">
       <button type="button" data-tab="caja" class="activo">Caja</button>
       <button type="button" data-tab="inventario">
         Inventario
@@ -158,9 +175,10 @@
         Vender
         <span id="cart-badge" class="tab-badge oro" hidden>0</span>
       </button>
+      <button type="button" data-tab="reporte">Reporte</button>
     </nav>
   </div>
 
-  <script src="/static/app.js?v=3"></script>
+  <script src="/static/app.js?v=5"></script>
 </body>
 </html>

@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
+from auth_pos import autenticar, filtrar_estado
 from snapshot import leer_estado
 from ticket import _printer_name
 from ventas import METODOS, VentaError, registrar_venta
@@ -38,9 +39,9 @@ CONFIG_PATH = ROOT / "config.json"
 PUERTO = int(os.environ.get("PANEL_PUERTO", "5050"))
 PIN_ITERS = 40_000
 
-_tokens: dict[str, float] = {}
+_tokens: dict[str, dict[str, Any]] = {}
 _intentos: dict[str, list[float]] = {}
-_clientes_ws: set[WebSocket] = set()
+_clientes_ws: dict[WebSocket, dict[str, Any]] = {}
 _ultima_firma = ""
 _config: dict[str, Any] = {}
 
@@ -134,13 +135,13 @@ async def publicar_estado() -> dict[str, Any]:
     estado = estado_actual()
     _ultima_firma = str(estado.get("firma") or "")
     muertos = []
-    for cliente in list(_clientes_ws):
+    for cliente, sesion in list(_clientes_ws.items()):
         try:
-            await cliente.send_json(estado)
+            await cliente.send_json(filtrar_estado(estado, sesion))
         except Exception:
             muertos.append(cliente)
     for cliente in muertos:
-        _clientes_ws.discard(cliente)
+        _clientes_ws.pop(cliente, None)
     return estado
 
 
@@ -168,24 +169,30 @@ def url_panel() -> str:
     return f"http://{host}:{PUERTO}"
 
 
-def token_valido(token: str | None) -> bool:
+def sesion_de_token(token: str | None) -> dict[str, Any] | None:
     if not token:
-        return False
-    expira = _tokens.get(token)
-    if not expira:
-        return False
-    if expira < time.time():
+        return None
+    data = _tokens.get(token)
+    if not data:
+        return None
+    if float(data.get("expira") or 0) < time.time():
         _tokens.pop(token, None)
-        return False
-    return True
+        return None
+    return data
 
 
-def exigir_token(authorization: str | None) -> None:
+def token_valido(token: str | None) -> bool:
+    return sesion_de_token(token) is not None
+
+
+def exigir_sesion(authorization: str | None) -> dict[str, Any]:
     token = None
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization.split(" ", 1)[1].strip()
-    if not token_valido(token):
+    sesion = sesion_de_token(token)
+    if not sesion:
         raise HTTPException(status_code=401, detail="Sesión inválida")
+    return sesion
 
 
 def _rate_limit(ip: str) -> None:
@@ -211,7 +218,7 @@ async def conexion(request: Request) -> HTMLResponse:
             "request": request,
             "url": url_panel(),
             "urls": [f"http://{ip}:{PUERTO}" for ip in ips_lan()] or [f"http://127.0.0.1:{PUERTO}"],
-            "pin": pin_visible(),
+            "pin": "",
             "puerto": PUERTO,
             "nube": nube_activa(),
             "url_publica": url_publica(),
@@ -247,20 +254,32 @@ async def login(request: Request) -> JSONResponse:
     ip = request.client.host if request.client else "local"
     _rate_limit(ip)
     body = await request.json()
-    pin = str(body.get("pin") or "").strip()
-    esperado = _config.get("pin_hash", "")
-    salt = _config.get("salt", "")
-    recibido = _hash_pin(pin, salt)
-    if not hmac.compare_digest(recibido, esperado):
-        raise HTTPException(status_code=401, detail="PIN incorrecto")
+    usuario = str(body.get("usuario") or "").strip()
+    contrasena = str(body.get("contrasena") or "")
+    persona = autenticar(usuario, contrasena)
+    if not persona:
+        raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
     token = secrets.token_urlsafe(32)
-    _tokens[token] = time.time() + 60 * 60 * 18
-    return JSONResponse({"token": token, "expira_horas": 18})
+    _tokens[token] = {
+        "expira": time.time() + 60 * 60 * 18,
+        "usuario": persona["usuario"],
+        "rol": persona["rol"],
+        "es_admin": persona["es_admin"],
+    }
+    return JSONResponse(
+        {
+            "token": token,
+            "expira_horas": 18,
+            "usuario": persona["usuario"],
+            "rol": persona["rol"],
+            "es_admin": persona["es_admin"],
+        }
+    )
 
 
 @app.post("/api/vender")
 async def vender(request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
-    exigir_token(authorization)
+    exigir_sesion(authorization)
     body = await request.json()
     recibido = body.get("recibido")
     if recibido == "" or recibido is None:
@@ -288,9 +307,9 @@ async def vender(request: Request, authorization: str | None = Header(default=No
 
 @app.get("/api/estado")
 async def estado(authorization: str | None = Header(default=None)) -> dict[str, Any]:
-    exigir_token(authorization)
+    sesion = exigir_sesion(authorization)
     try:
-        return estado_actual()
+        return filtrar_estado(estado_actual(), sesion)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -298,13 +317,14 @@ async def estado(authorization: str | None = Header(default=None)) -> dict[str, 
 @app.websocket("/ws")
 async def websocket_panel(ws: WebSocket) -> None:
     token = ws.query_params.get("token")
-    if not token_valido(token):
+    sesion = sesion_de_token(token)
+    if not sesion:
         await ws.close(code=4401)
         return
     await ws.accept()
-    _clientes_ws.add(ws)
+    _clientes_ws[ws] = sesion
     try:
-        await ws.send_json(estado_actual())
+        await ws.send_json(filtrar_estado(estado_actual(), sesion))
         while True:
             await ws.receive_text()
     except WebSocketDisconnect:
@@ -312,7 +332,7 @@ async def websocket_panel(ws: WebSocket) -> None:
     except Exception:
         pass
     finally:
-        _clientes_ws.discard(ws)
+        _clientes_ws.pop(ws, None)
 
 
 async def bucle_vigilancia() -> None:
@@ -324,13 +344,13 @@ async def bucle_vigilancia() -> None:
             if firma and firma != _ultima_firma:
                 _ultima_firma = str(firma)
                 muertos = []
-                for cliente in list(_clientes_ws):
+                for cliente, sesion in list(_clientes_ws.items()):
                     try:
-                        await cliente.send_json(estado)
+                        await cliente.send_json(filtrar_estado(estado, sesion))
                     except Exception:
                         muertos.append(cliente)
                 for cliente in muertos:
-                    _clientes_ws.discard(cliente)
+                    _clientes_ws.pop(cliente, None)
         except Exception:
             pass
         await asyncio.sleep(0.8)
@@ -351,7 +371,6 @@ async def bucle_nube() -> None:
 def imprimir_banner() -> None:
     cargar_config()
     url = url_panel()
-    pin = pin_visible()
     lineas = [
         "",
         "  ============================================",
@@ -359,7 +378,7 @@ def imprimir_banner() -> None:
         "  ============================================",
         "   Deja esta ventana abierta mientras atienden.",
         f"   En el celular:  {url}",
-        f"   PIN:            {pin}",
+        "   Login:          usuario y contraseña del POS",
         "   El celular en el WiFi del local usa esa direccion.",
         f"   Nube:           {'conectada' if nube_activa() else 'sin configurar (ver nube.env)'}",
         *([f"   Desde internet: {url_publica()}"] if url_publica() else []),
