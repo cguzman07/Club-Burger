@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Conectar celular · Club Burger</title>
+  <link rel="icon" href="/static/favicon.ico" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="conexion-body">
+  <main class="conexion">
+    <img class="logo-grande" src="/static/logo.png" alt="Club Burger" />
+    <p class="eyebrow">Panel del dueño · Etapa 1</p>
+    <h1>Abre esto en el celular</h1>
+    <p class="lead">El mostrador sigue en el computador. En el WiFi del local puedes usar el QR. Si ya configuraste la nube, el dueño entra desde cualquier lugar.</p>
+
+    <div class="qr-card">
+      <img class="qr" src="/qr.svg" alt="Código QR para abrir el panel" />
+      <p class="url">{{ url }}</p>
+      {% if urls|length > 1 %}
+      <ul class="urls-alt">
+        {% for extra in urls %}
+        <li>{{ extra }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+
+    <div class="pin-box">
+      <span>PIN del dueño (WiFi local)</span>
+      <strong>{{ pin }}</strong>
+    </div>
+
+    {% if url_publica %}
+    <div class="pin-box">
+      <span>Desde internet</span>
+      <strong class="url-nube">{{ url_publica }}</strong>
+    </div>
+    {% endif %}
+
+    <p class="muted">Nube: {{ 'conectada' if nube else 'aún no configurada (nube.env)' }}</p>
+
+    <ol class="pasos">
+      <li>En el celular, conéctate al <strong>mismo WiFi</strong> del restaurante.</li>
+      <li>Escanea el código o escribe la dirección en el navegador.</li>
+      <li>Ingresa el PIN. Verás ventas, métodos de pago, caja y quién atiende.</li>
+      <li>Deja <strong>esta ventana abierta</strong> en el PC mientras atiendan.</li>
+      <li>Los pedidos remotos se imprimen en la impresora del restaurante.</li>
+      <li>Si el celular no entra, permite Python en el firewall de Windows (puerto {{ puerto }}).</li>
+    </ol>
+  </main>
+</body>
+</html>
