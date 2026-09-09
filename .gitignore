@@ -6,10 +6,6 @@ panel_dueno/nube_state.json
 panel_dueno/config.json
 local.env
 nube/web/config.js
-_internal/
-*.exe
-datos_pos.db
-numero_factura.txt
 __pycache__/
 *.pyc
 .DS_Store
