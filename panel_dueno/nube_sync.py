@@ -5,12 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import socket
 import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+_PRIMER_CICLO = True
 
 from auth_pos import clave_auth, email_pos
 from snapshot import db_path, _connect, _rows
@@ -54,7 +57,11 @@ def credenciales_nube() -> tuple[str, str]:
 
 def url_publica() -> str:
     archivo = _leer_env_archivo()
-    return (os.environ.get("PANEL_PUBLICO_URL") or archivo.get("PANEL_PUBLICO_URL") or "").strip()
+    return (
+        os.environ.get("PANEL_PUBLICO_URL")
+        or archivo.get("PANEL_PUBLICO_URL")
+        or "https://clubburger.app"
+    ).strip()
 
 
 def nube_activa() -> bool:
@@ -110,6 +117,12 @@ def _filas_sqlite() -> dict[str, list[dict[str, Any]]]:
             }
             for r in _rows(conn, "SELECT * FROM productos")
         ]
+        def _get(fila, clave, defecto=None):
+            try:
+                return fila[clave]
+            except (KeyError, IndexError):
+                return defecto
+
         caja = []
         for r in _rows(conn, "SELECT * FROM caja"):
             caja.append(
@@ -123,7 +136,7 @@ def _filas_sqlite() -> dict[str, list[dict[str, Any]]]:
                     "hora_cierre": r["hora_cierre"],
                     "capital_final": r["capital_final"],
                     "total_ventas": r["total_ventas"],
-                    "fecha_cierre": r["fecha_cierre"],
+                    "fecha_cierre": _get(r, "fecha_cierre"),
                 }
             )
         ventas = []
@@ -139,7 +152,7 @@ def _filas_sqlite() -> dict[str, list[dict[str, Any]]]:
                     "total": r["total"],
                     "metodo_pago": r["metodo_pago"],
                     "id_caja": r["id_caja"],
-                    "nota": r["nota"],
+                    "nota": _get(r, "nota"),
                 }
             )
         return {"productos": productos, "caja": caja, "ventas": ventas}
@@ -322,11 +335,18 @@ def procesar_pedidos_remotos() -> int:
 
 def ciclo_nube(obtener_payload) -> str:
     """Una pasada: atiende pedidos, sube estado si cambió. Devuelve mensaje corto."""
+    global _PRIMER_CICLO
     if not nube_activa():
         return "nube desactivada"
     if not db_path().exists():
         return "sin base local"
     sync = _cargar_estado_sync()
+    equipo = socket.gethostname()
+    if sync.get("equipo") != equipo:
+        sync["equipo"] = equipo
+        sync["last_beat"] = 0
+        sync["ultima_firma"] = ""
+        sync["firma_usuarios"] = None
     try:
         procesados = procesar_pedidos_remotos()
         try:
@@ -334,9 +354,12 @@ def ciclo_nube(obtener_payload) -> str:
         except Exception as exc:
             sync["ultimo_error_auth"] = str(exc)[:200]
         payload = obtener_payload()
+        payload["equipo"] = equipo
         firma = str(payload.get("firma") or "")
         ahora_ts = time.time()
-        if procesados or firma != sync.get("ultima_firma"):
+        forzar = _PRIMER_CICLO
+        _PRIMER_CICLO = False
+        if forzar or procesados or firma != sync.get("ultima_firma"):
             subir_estado(payload)
             sync["ultima_firma"] = firma
             sync["last_beat"] = ahora_ts

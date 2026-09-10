@@ -183,17 +183,18 @@ function setLive(ok, texto) {
 function pcReciente(iso) {
   if (!iso) return false;
   const t = new Date(iso).getTime();
-  return Number.isFinite(t) && Date.now() - t < 20000;
+  return Number.isFinite(t) && Date.now() - t < 45000;
 }
 
 function aplicarFila(row) {
   if (!row) return;
   pcEnLinea = Boolean(row.pc_en_linea) && pcReciente(row.updated_at);
-  setLive(pcEnLinea, pcEnLinea ? "En vivo" : "PC apagado");
+  const equipo = row.payload?.equipo ? String(row.payload.equipo) : "";
+  setLive(pcEnLinea, pcEnLinea ? (equipo ? `En vivo · ${equipo}` : "En vivo") : "PC apagado");
   if (!pcEnLinea) {
     pcBanner.hidden = false;
     pcBanner.innerHTML =
-      "<strong>El computador del restaurante no está en línea</strong><span class=\"muted\">Puedes ver lo último que se subió. Para imprimir, enciende el panel en el PC.</span>";
+      "<strong>El computador del restaurante no está en línea</strong><span class=\"muted\">Abre Club Burger en el PC del negocio (el panel arranca solo). No hace falta el otro portátil. Luego espera unos segundos y recarga.</span>";
   } else {
     pcBanner.hidden = true;
   }
