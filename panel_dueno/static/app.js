@@ -49,9 +49,22 @@ function esc(texto) {
     .replace(/"/g, "&quot;");
 }
 
+function mensajeLogin(err) {
+  const t = String(err?.message || err || "");
+  if (/failed to fetch|networkerror|load failed/i.test(t)) {
+    return "No se pudo conectar al panel. En el computador deja abierto «Iniciar Panel Dueño».";
+  }
+  return t || "No se pudo entrar";
+}
+
 document.getElementById("login-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
+  const boton = ev.target.querySelector("button[type='submit']");
   loginError.hidden = true;
+  if (boton) {
+    boton.disabled = true;
+    boton.textContent = "Entrando…";
+  }
   try {
     const res = await fetch("/api/login", {
       method: "POST",
@@ -61,14 +74,22 @@ document.getElementById("login-form").addEventListener("submit", async (ev) => {
         contrasena: document.getElementById("contrasena").value,
       }),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "Usuario o contraseña incorrectos");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detalle = typeof data.detail === "string" ? data.detail : "Usuario o contraseña incorrectos";
+      throw new Error(detalle);
+    }
     token = data.token;
     sessionStorage.setItem("cb_token", token);
     mostrarPanel();
   } catch (err) {
     loginError.hidden = false;
-    loginError.textContent = err.message || "No se pudo entrar";
+    loginError.textContent = mensajeLogin(err);
+  } finally {
+    if (boton) {
+      boton.disabled = false;
+      boton.textContent = "Entrar";
+    }
   }
 });
 

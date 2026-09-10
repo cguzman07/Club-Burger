@@ -160,9 +160,13 @@ def _auth_admin(method: str, path: str, body: dict[str, Any] | None = None) -> A
         },
         method=method,
     )
-    with urllib.request.urlopen(req, timeout=25) as resp:
-        raw = resp.read()
-        return json.loads(raw.decode("utf-8")) if raw else None
+    try:
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            raw = resp.read()
+            return json.loads(raw.decode("utf-8")) if raw else None
+    except urllib.error.HTTPError as e:
+        detalle = e.read().decode("utf-8", "replace")[:500]
+        raise RuntimeError(f"Auth {method} {path} → {e.code}: {detalle}") from e
 
 
 def _firma_usuarios() -> str:
@@ -180,7 +184,9 @@ def _firma_usuarios() -> str:
 def sincronizar_usuarios_pos(sync: dict[str, Any]) -> None:
     """Crea/actualiza en Supabase Auth las mismas cuentas del POS (usuario + contraseña)."""
     firma = _firma_usuarios()
-    if not firma or sync.get("firma_usuarios") == firma:
+    if not firma:
+        return
+    if sync.get("firma_usuarios") == firma and not sync.get("ultimo_error_auth"):
         return
     conn = _connect()
     try:
@@ -229,11 +235,13 @@ def sincronizar_usuarios_pos(sync: dict[str, Any]) -> None:
                 )
             else:
                 _auth_admin("POST", "/admin/users", payload)
-        except urllib.error.HTTPError:
+        except Exception as exc:
             hubo_error = True
+            sync["ultimo_error_auth"] = f"{usuario}: {exc}"[:400]
             continue
     if not hubo_error:
         sync["firma_usuarios"] = firma
+        sync["ultimo_error_auth"] = None
 
 
 def subir_estado(payload: dict[str, Any]) -> None:
@@ -350,3 +358,13 @@ def ciclo_nube(obtener_payload) -> str:
         sync["ultimo_error"] = str(exc)[:400]
         _guardar_estado_sync(sync)
         return f"error: {exc}"
+
+
+if __name__ == "__main__":
+    estado = _cargar_estado_sync()
+    estado.pop("firma_usuarios", None)
+    estado["ultimo_error_auth"] = "forzar"
+    sincronizar_usuarios_pos(estado)
+    _guardar_estado_sync(estado)
+    err = estado.get("ultimo_error_auth")
+    print("SYNC_OK" if not err else f"SYNC_ERR {err}")

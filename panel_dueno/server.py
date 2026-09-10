@@ -253,7 +253,12 @@ async def salud() -> dict[str, Any]:
 async def login(request: Request) -> JSONResponse:
     ip = request.client.host if request.client else "local"
     _rate_limit(ip)
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Usuario o contraseña incorrectos")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Usuario o contraseña incorrectos")
     usuario = str(body.get("usuario") or "").strip()
     contrasena = str(body.get("contrasena") or "")
     persona = autenticar(usuario, contrasena)

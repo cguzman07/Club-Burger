@@ -88,6 +88,8 @@ h3 {
 .error {
   color: var(--off);
   min-height: 1.2em;
+  font-weight: 650;
+  margin-top: 8px;
 }
 
 .pad {

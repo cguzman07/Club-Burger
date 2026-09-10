@@ -80,9 +80,25 @@ function crearCliente() {
   return window.supabase.createClient(cfg.url, cfg.anonKey);
 }
 
+function mensajeLogin(err) {
+  const t = String(err?.message || err || "");
+  if (/invalid login|invalid_credentials/i.test(t)) {
+    return "Usuario o contraseña incorrectos. Escríbelos igual que en el computador, por ejemplo admin.";
+  }
+  if (/failed to fetch|networkerror|load failed/i.test(t)) {
+    return "No se pudo conectar. Revisa el internet del celular e intenta de nuevo.";
+  }
+  return t || "No se pudo entrar";
+}
+
 document.getElementById("login-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
+  const boton = ev.target.querySelector("button[type='submit']");
   loginError.hidden = true;
+  if (boton) {
+    boton.disabled = true;
+    boton.textContent = "Entrando…";
+  }
   try {
     supabase = crearCliente();
     const usuario = document.getElementById("usuario").value;
@@ -94,7 +110,12 @@ document.getElementById("login-form").addEventListener("submit", async (ev) => {
     mostrarPanel();
   } catch (err) {
     loginError.hidden = false;
-    loginError.textContent = err.message || "No se pudo entrar";
+    loginError.textContent = mensajeLogin(err);
+  } finally {
+    if (boton) {
+      boton.disabled = false;
+      boton.textContent = "Entrar";
+    }
   }
 });
 
