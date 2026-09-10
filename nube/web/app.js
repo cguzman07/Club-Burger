@@ -39,9 +39,24 @@ const POS_CLAVE_EXTRA = "#cb";
 
 function credencialesPos(usuario, contrasena) {
   const u = (usuario || "").trim();
-  if (u.includes("@")) return { email: u, password: contrasena };
+  const clave = contrasena || "";
   const slug = u.toLowerCase().replace(/[^a-z0-9._-]/g, "") || "usuario";
-  return { email: `${slug}@${POS_DOMINIO}`, password: `${contrasena}${POS_CLAVE_EXTRA}` };
+  const emailPos = `${slug}@${POS_DOMINIO}`;
+  const password = clave.endsWith(POS_CLAVE_EXTRA) ? clave : `${clave}${POS_CLAVE_EXTRA}`;
+  if (u.includes("@") && !u.toLowerCase().endsWith(`@${POS_DOMINIO}`)) {
+    return { email: u, password: clave, fallback: { email: emailPos, password } };
+  }
+  return { email: emailPos, password };
+}
+
+function crearCliente() {
+  if (!window.supabase || typeof window.supabase.createClient !== "function") {
+    throw new Error("No se cargó la app. Cierra Chrome o Safari, entra otra vez a clubburger.app y usa datos o WiFi.");
+  }
+  if (!cfg.url || !cfg.anonKey) {
+    throw new Error("Falta configurar Supabase en Netlify (SUPABASE_URL y SUPABASE_ANON_KEY).");
+  }
+  return window.supabase.createClient(cfg.url, cfg.anonKey);
 }
 
 function sesionDeAuth(persona) {
@@ -73,13 +88,6 @@ function esc(texto) {
     .replace(/"/g, "&quot;");
 }
 
-function crearCliente() {
-  if (!cfg.url || !cfg.anonKey) {
-    throw new Error("Falta configurar Supabase en Netlify (SUPABASE_URL y SUPABASE_ANON_KEY).");
-  }
-  return window.supabase.createClient(cfg.url, cfg.anonKey);
-}
-
 function mensajeLogin(err) {
   const t = String(err?.message || err || "");
   if (/invalid login|invalid_credentials/i.test(t)) {
@@ -103,10 +111,16 @@ document.getElementById("login-form").addEventListener("submit", async (ev) => {
     supabase = crearCliente();
     const usuario = document.getElementById("usuario").value;
     const contrasena = document.getElementById("contrasena").value;
-    const { email, password } = credencialesPos(usuario, contrasena);
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    user = data.user;
+    const creds = credencialesPos(usuario, contrasena);
+    let resultado = await supabase.auth.signInWithPassword({
+      email: creds.email,
+      password: creds.password,
+    });
+    if (resultado.error && creds.fallback) {
+      resultado = await supabase.auth.signInWithPassword(creds.fallback);
+    }
+    if (resultado.error) throw resultado.error;
+    user = resultado.data.user;
     mostrarPanel();
   } catch (err) {
     loginError.hidden = false;
