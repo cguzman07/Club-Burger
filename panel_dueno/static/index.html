@@ -11,7 +11,7 @@
   <link rel="icon" href="/static/favicon.ico" />
   <link rel="apple-touch-icon" href="/static/logo.png" />
   <link rel="manifest" href="/static/manifest.json" />
-    <link rel="stylesheet" href="/static/styles.css?v=6" />
+    <link rel="stylesheet" href="/static/styles.css?v=8" />
   </head>
   <body>
   <div id="login" class="pantalla">
@@ -115,26 +115,51 @@
 
     <div id="vista-reporte" hidden>
       <section class="hero mini-hero">
-        <p class="muted">Reporte del día</p>
+        <p class="muted">Ventas en la nube</p>
         <p id="rep-total" class="money small">$ 0</p>
         <p id="rep-fecha" class="muted">—</p>
       </section>
+      <div id="rep-periodos" class="chips">
+        <button type="button" data-periodo="dia" class="activo">Hoy</button>
+        <button type="button" data-periodo="semana">Semana</button>
+        <button type="button" data-periodo="mes">Mes</button>
+        <button type="button" data-periodo="anio">Año</button>
+        <button type="button" data-periodo="rango">Rango</button>
+      </div>
+      <div id="rep-rango" class="rango-fechas" hidden>
+        <input id="rep-desde" type="date" />
+        <input id="rep-hasta" type="date" />
+        <button type="button" id="rep-aplicar">Ver</button>
+      </div>
       <div id="rep-dias" class="chips"></div>
       <div class="fila">
         <article class="stat"><span>Efectivo</span><strong id="rep-efectivo">$ 0</strong></article>
         <article class="stat"><span>Nequi y otros</span><strong id="rep-otros">$ 0</strong></article>
       </div>
       <p id="rep-items" class="muted mini">Sin ventas</p>
+      <p id="rep-aviso" class="muted mini" hidden></p>
+      <div class="exportar">
+        <button type="button" id="rep-excel">Exportar Excel para el contador</button>
+        <button type="button" id="rep-imprimir">Imprimir / PDF</button>
+      </div>
       <section>
         <h3>Por método de pago</h3>
         <div id="rep-metodos" class="metodos"></div>
       </section>
       <section>
-        <h3>Cuadre de caja</h3>
+        <h3>Por producto</h3>
+        <div id="rep-productos" class="lista"></div>
+      </section>
+      <section>
+        <h3>Por día</h3>
+        <div id="rep-por-dia" class="lista"></div>
+      </section>
+      <section>
+        <h3>Cuadre de caja (computador)</h3>
         <div id="rep-sesiones" class="lista"></div>
       </section>
       <section>
-        <h3>Fiados</h3>
+        <h3>Fiados (computador)</h3>
         <p id="rep-fiados" class="muted">Sin fiados</p>
       </section>
     </div>
@@ -179,6 +204,6 @@
     </nav>
   </div>
 
-  <script src="/static/app.js?v=6"></script>
+  <script src="/static/app.js?v=8"></script>
 </body>
 </html>

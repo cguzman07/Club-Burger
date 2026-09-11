@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import socket
 import time
 import urllib.error
 import urllib.request
@@ -13,11 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_PRIMER_CICLO = True
-
 from auth_pos import clave_auth, email_pos
 from snapshot import db_path, _connect, _rows
 from ticket import _printer_name
+from libro import sincronizar_libro
 from ventas import VentaError, registrar_venta
 
 ROOT = Path(__file__).resolve().parent
@@ -117,45 +115,7 @@ def _filas_sqlite() -> dict[str, list[dict[str, Any]]]:
             }
             for r in _rows(conn, "SELECT * FROM productos")
         ]
-        def _get(fila, clave, defecto=None):
-            try:
-                return fila[clave]
-            except (KeyError, IndexError):
-                return defecto
-
-        caja = []
-        for r in _rows(conn, "SELECT * FROM caja"):
-            caja.append(
-                {
-                    "id": r["id"],
-                    "usuario": r["usuario"],
-                    "fecha": r["fecha"],
-                    "hora_apertura": r["hora_apertura"],
-                    "capital_inicial": r["capital_inicial"],
-                    "detalle_capital": r["detalle_capital"],
-                    "hora_cierre": r["hora_cierre"],
-                    "capital_final": r["capital_final"],
-                    "total_ventas": r["total_ventas"],
-                    "fecha_cierre": _get(r, "fecha_cierre"),
-                }
-            )
-        ventas = []
-        for r in _rows(conn, "SELECT * FROM ventas"):
-            ventas.append(
-                {
-                    "id": r["id"],
-                    "fecha": r["fecha"],
-                    "producto_id": r["producto_id"],
-                    "nombre_producto": r["nombre_producto"],
-                    "cantidad": r["cantidad"],
-                    "precio_unitario": r["precio_unitario"],
-                    "total": r["total"],
-                    "metodo_pago": r["metodo_pago"],
-                    "id_caja": r["id_caja"],
-                    "nota": _get(r, "nota"),
-                }
-            )
-        return {"productos": productos, "caja": caja, "ventas": ventas}
+        return {"productos": productos}
     finally:
         conn.close()
 
@@ -274,10 +234,6 @@ def subir_estado(payload: dict[str, Any]) -> None:
     tablas = _filas_sqlite()
     if tablas["productos"]:
         client.table("productos").upsert(tablas["productos"]).execute()
-    if tablas["caja"]:
-        client.table("caja").upsert(tablas["caja"]).execute()
-    if tablas["ventas"]:
-        client.table("ventas").upsert(tablas["ventas"]).execute()
 
 
 def procesar_pedidos_remotos() -> int:
@@ -335,18 +291,11 @@ def procesar_pedidos_remotos() -> int:
 
 def ciclo_nube(obtener_payload) -> str:
     """Una pasada: atiende pedidos, sube estado si cambió. Devuelve mensaje corto."""
-    global _PRIMER_CICLO
     if not nube_activa():
         return "nube desactivada"
     if not db_path().exists():
         return "sin base local"
     sync = _cargar_estado_sync()
-    equipo = socket.gethostname()
-    if sync.get("equipo") != equipo:
-        sync["equipo"] = equipo
-        sync["last_beat"] = 0
-        sync["ultima_firma"] = ""
-        sync["firma_usuarios"] = None
     try:
         procesados = procesar_pedidos_remotos()
         try:
@@ -354,12 +303,15 @@ def ciclo_nube(obtener_payload) -> str:
         except Exception as exc:
             sync["ultimo_error_auth"] = str(exc)[:200]
         payload = obtener_payload()
-        payload["equipo"] = equipo
         firma = str(payload.get("firma") or "")
         ahora_ts = time.time()
-        forzar = _PRIMER_CICLO
-        _PRIMER_CICLO = False
-        if forzar or procesados or firma != sync.get("ultima_firma"):
+        libro = sincronizar_libro(_cliente())
+        if not libro.get("ok") and libro.get("error"):
+            sync["ultimo_error_libro"] = libro["error"]
+        else:
+            sync["ultimo_error_libro"] = None
+            sync["libro_locales"] = libro.get("locales")
+        if procesados or firma != sync.get("ultima_firma"):
             subir_estado(payload)
             sync["ultima_firma"] = firma
             sync["last_beat"] = ahora_ts

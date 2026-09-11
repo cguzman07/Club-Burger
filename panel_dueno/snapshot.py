@@ -48,6 +48,21 @@ def _es_vacio(valor: Any) -> bool:
     return valor is None or str(valor).strip() == ""
 
 
+def _caja_sesion_vigente(caja: sqlite3.Row | None, hoy: str) -> bool:
+    """Caja abierta de verdad: sin cierre y del turno actual (hoy o ayer)."""
+    if caja is None or not _es_vacio(caja["hora_cierre"]):
+        return False
+    fecha = str(caja["fecha"] or "")[:10]
+    if not fecha:
+        return False
+    try:
+        dia = datetime.strptime(fecha, "%Y-%m-%d").date()
+        actual = datetime.strptime(hoy, "%Y-%m-%d").date()
+    except ValueError:
+        return False
+    return (actual - dia).days <= 1
+
+
 def _fmt_fecha(fecha: str | None, hora: str | None = None) -> str:
     if not fecha:
         return "—"
@@ -278,7 +293,7 @@ def leer_estado(umbral: int = 5) -> dict[str, Any]:
     conn = _connect()
     try:
         cajas = _rows(conn, "SELECT * FROM caja ORDER BY id DESC")
-        caja_abierta = next((c for c in cajas if _es_vacio(c["hora_cierre"])), None)
+        caja_abierta = next((c for c in cajas if _caja_sesion_vigente(c, hoy)), None)
         caja_ref = caja_abierta or (cajas[0] if cajas else None)
 
         ventas_todas = _rows(

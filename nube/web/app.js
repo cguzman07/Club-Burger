@@ -25,6 +25,8 @@ let ultimaFirma = "";
 let ultimoEstado = null;
 let tabActual = "caja";
 let diaReporte = "";
+let periodoReporte = "dia";
+let reporteNube = null;
 let filtroInv = "todos";
 let inventario = { productos: [], categorias: [], umbral: 5, atencion: 0, agotados: 0, bajos: 0, ok: 0, total: 0 };
 let carrito = {};
@@ -165,6 +167,7 @@ function cambiarTab(tab) {
   document.querySelectorAll("#tabs button").forEach((b) => {
     b.classList.toggle("activo", b.dataset.tab === tab);
   });
+  if (tab === "reporte") cargarReporteNube();
 }
 
 function mostrarPanel() {
@@ -269,7 +272,7 @@ function pintar(estado) {
     ? "Por método de pago · caja actual"
     : "Por método de pago · última caja";
   pintarMetodos(mapaMetodos(estado.ventas_caja?.por_metodo));
-  pintarReporte(estado);
+  pintarReporteLocal(estado);
   aplicarPoliticas(sesionDeAuth(user));
   pintarLista(topEl, estado.top_productos || [], (p) => ({
     titulo: p.nombre,
@@ -399,39 +402,148 @@ function pintarMetodos(mapa, destino) {
     .join("");
 }
 
-function pintarReporte(estado) {
-  const reporte = estado.reporte;
-  const diasEl = document.getElementById("rep-dias");
-  if (!reporte || !diasEl) return;
-  const dias = reporte.dias || [];
-  if (!diaReporte || !dias.some((d) => d.fecha === diaReporte)) {
-    diaReporte = reporte.hoy?.fecha || dias[0]?.fecha || "";
+function isoLocal(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function parseIso(texto) {
+  const m = String(texto || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+function rangoPeriodoJS() {
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const elegido = parseIso(document.getElementById("rep-desde")?.value) || hoy;
+  const hastaSel = parseIso(document.getElementById("rep-hasta")?.value);
+  if (periodoReporte === "semana") {
+    const inicio = new Date(elegido);
+    inicio.setDate(elegido.getDate() - ((elegido.getDay() + 6) % 7));
+    const fin = new Date(inicio);
+    fin.setDate(inicio.getDate() + 6);
+    return { desde: isoLocal(inicio), hasta: isoLocal(fin), etiqueta: `Semana del ${inicio.getDate()} al ${fin.getDate()}` };
   }
-  const dia = dias.find((d) => d.fecha === diaReporte) || reporte.hoy;
-  if (!dia) return;
-  diasEl.innerHTML = dias
-    .slice(0, 14)
-    .map(
-      (d) =>
-        `<button type="button" data-dia="${esc(d.fecha)}" class="${d.fecha === dia.fecha ? "activo" : ""}">${esc(
-          d.es_hoy ? "Hoy" : d.etiqueta
-        )}</button>`
-    )
-    .join("");
-  const ventas = dia.ventas || {};
-  document.getElementById("rep-total").textContent = dinero.format(ventas.total || 0);
-  document.getElementById("rep-fecha").textContent = dia.es_hoy ? `Hoy · ${dia.etiqueta}` : dia.etiqueta;
-  document.getElementById("rep-efectivo").textContent = dinero.format(ventas.efectivo || 0);
-  document.getElementById("rep-otros").textContent = dinero.format(ventas.otros_medios || 0);
-  const items = ventas.items || 0;
+  if (periodoReporte === "mes") {
+    const inicio = new Date(elegido.getFullYear(), elegido.getMonth(), 1);
+    const fin = new Date(elegido.getFullYear(), elegido.getMonth() + 1, 0);
+    const meses = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
+    return { desde: isoLocal(inicio), hasta: isoLocal(fin), etiqueta: `${meses[inicio.getMonth()]} ${inicio.getFullYear()}` };
+  }
+  if (periodoReporte === "anio") {
+    const inicio = new Date(elegido.getFullYear(), 0, 1);
+    const fin = new Date(elegido.getFullYear(), 11, 31);
+    return { desde: isoLocal(inicio), hasta: isoLocal(fin), etiqueta: String(inicio.getFullYear()) };
+  }
+  if (periodoReporte === "rango") {
+    let a = elegido;
+    let b = hastaSel || elegido;
+    if (a > b) [a, b] = [b, a];
+    return { desde: isoLocal(a), hasta: isoLocal(b), etiqueta: `${isoLocal(a)} → ${isoLocal(b)}` };
+  }
+  const dia = periodoReporte === "dia" && diaReporte ? parseIso(diaReporte) || elegido : elegido;
+  const esHoy = isoLocal(dia) === isoLocal(hoy);
+  return { desde: isoLocal(dia), hasta: isoLocal(dia), etiqueta: esHoy ? "Hoy" : isoLocal(dia) };
+}
+
+async function cargarReporteNube() {
+  if (!supabase) return;
+  const fechaEl = document.getElementById("rep-fecha");
+  if (fechaEl) fechaEl.textContent = "Cargando…";
+  const rango = rangoPeriodoJS();
+  try {
+    const { data, error } = await supabase.rpc("reporte_ventas", {
+      p_desde: rango.desde,
+      p_hasta: rango.hasta,
+    });
+    if (error) throw error;
+    const reporte = data && typeof data === "object" ? data : {};
+    reporte.etiqueta = rango.etiqueta;
+    reporte.fuente = "nube";
+    reporteNube = reporte;
+    pintarReporteNube(reporte);
+    if (ultimoEstado) pintarReporteLocal(ultimoEstado);
+  } catch (err) {
+    if (fechaEl) {
+      fechaEl.textContent = /schema cache|does not exist|libro_ventas/i.test(String(err.message || err))
+        ? "Falta crear el libro en Supabase (schema.sql)"
+        : err.message || "No se pudo cargar el reporte";
+    }
+  }
+}
+
+function pintarReporteNube(data) {
+  if (!data) return;
+  document.getElementById("rep-total").textContent = dinero.format(data.total || 0);
+  document.getElementById("rep-fecha").textContent = data.etiqueta || "—";
+  document.getElementById("rep-efectivo").textContent = dinero.format(data.efectivo || 0);
+  document.getElementById("rep-otros").textContent = dinero.format(data.otros_medios || 0);
+  const items = data.items || 0;
+  const lineas = data.lineas || 0;
   document.getElementById("rep-items").textContent = items
-    ? `${items} ítem${items === 1 ? "" : "s"} vendidos`
-    : "Sin ventas ese día";
-  pintarMetodos(mapaMetodos(ventas.por_metodo), document.getElementById("rep-metodos"));
+    ? `${items} ítem${items === 1 ? "" : "s"} · ${lineas} línea${lineas === 1 ? "" : "s"} · nube`
+    : "Sin ventas en ese período";
+  const aviso = document.getElementById("rep-aviso");
+  if (aviso) {
+    aviso.hidden = !data.aviso;
+    aviso.textContent = data.aviso || "";
+  }
+  pintarMetodos(mapaMetodos(data.por_metodo), document.getElementById("rep-metodos"));
+  const prodEl = document.getElementById("rep-productos");
+  const diaEl = document.getElementById("rep-por-dia");
+  if (prodEl) {
+    pintarLista(prodEl, data.por_producto || [], (p) => ({
+      titulo: p.nombre,
+      sub: `${p.cantidad} vendidos`,
+      valor: dinero.format(p.total),
+    }));
+  }
+  if (diaEl) {
+    pintarLista(diaEl, data.por_dia || [], (d) => ({
+      titulo: d.fecha,
+      sub: `${d.items || 0} ítems`,
+      valor: dinero.format(d.total),
+    }));
+  }
+}
+
+function pintarReporte(estado) {
+  pintarReporteLocal(estado);
+}
+
+function pintarReporteLocal(estado) {
+  const reporte = estado?.reporte;
+  const diasEl = document.getElementById("rep-dias");
+  if (!diasEl) return;
+  const mostrarDias = periodoReporte === "dia";
+  diasEl.hidden = !mostrarDias;
+  const dias = reporte?.dias || [];
+  if (mostrarDias && dias.length) {
+    if (!diaReporte || !dias.some((d) => d.fecha === diaReporte)) {
+      diaReporte = reporte?.hoy?.fecha || dias[0]?.fecha || "";
+    }
+    diasEl.innerHTML = dias
+      .slice(0, 14)
+      .map(
+        (d) =>
+          `<button type="button" data-dia="${esc(d.fecha)}" class="${d.fecha === diaReporte ? "activo" : ""}">${esc(
+            d.es_hoy ? "Hoy" : d.etiqueta
+          )}</button>`
+      )
+      .join("");
+  }
+  const dia = dias.find((d) => d.fecha === diaReporte) || reporte?.hoy;
   const sesionesEl = document.getElementById("rep-sesiones");
-  const sesiones = dia.sesiones || [];
+  const sesiones = periodoReporte === "dia" ? dia?.sesiones || [] : [];
+  if (!sesionesEl) return;
   if (!sesiones.length) {
-    sesionesEl.innerHTML = '<p class="vacio">No hubo caja ese día</p>';
+    sesionesEl.innerHTML =
+      periodoReporte === "dia"
+        ? '<p class="vacio">No hubo caja ese día</p>'
+        : '<p class="vacio">El cuadre de caja se ve en el reporte del día</p>';
   } else {
     sesionesEl.innerHTML = sesiones
       .map((s) => {
@@ -456,17 +568,19 @@ function pintarReporte(estado) {
       })
       .join("");
   }
-  const fiados = dia.fiados || {};
+  const fiados = periodoReporte === "dia" ? dia?.fiados || {} : {};
   const fiadosEl = document.getElementById("rep-fiados");
+  if (!fiadosEl) return;
   if (!fiados.nuevos && !fiados.pagos && !fiados.pendiente) {
-    fiadosEl.textContent = "Sin fiados";
+    fiadosEl.textContent = periodoReporte === "dia" ? "Sin fiados" : "Los fiados se ven en el reporte del día";
   } else {
     fiadosEl.textContent = `Nuevos ${dinero.format(fiados.monto_nuevo || 0)} · pagos ${dinero.format(fiados.monto_pagado || 0)} · pendiente ${dinero.format(fiados.pendiente || 0)}`;
   }
 }
 
 function pintarLista(el, items, mapear) {
-  if (!items.length) {
+  if (!el) return;
+  if (!items || !items.length) {
     el.innerHTML = '<p class="vacio">Sin movimientos todavía</p>';
     return;
   }
@@ -657,9 +771,147 @@ document.getElementById("recibido").addEventListener("input", actualizarCambio);
 document.getElementById("cobrar").addEventListener("click", cobrar);
 document.getElementById("rep-dias").addEventListener("click", (ev) => {
   const boton = ev.target.closest("button[data-dia]");
-  if (!boton || !ultimoEstado) return;
+  if (!boton) return;
   diaReporte = boton.dataset.dia;
-  pintarReporte(ultimoEstado);
+  periodoReporte = "dia";
+  const desde = document.getElementById("rep-desde");
+  if (desde) desde.value = diaReporte;
+  if (ultimoEstado) pintarReporteLocal(ultimoEstado);
+  cargarReporteNube();
+});
+
+document.getElementById("rep-periodos")?.addEventListener("click", (ev) => {
+  const boton = ev.target.closest("button[data-periodo]");
+  if (!boton) return;
+  periodoReporte = boton.dataset.periodo;
+  document.querySelectorAll("#rep-periodos button").forEach((b) => {
+    b.classList.toggle("activo", b.dataset.periodo === periodoReporte);
+  });
+  const cajaRango = document.getElementById("rep-rango");
+  if (cajaRango) cajaRango.hidden = periodoReporte === "dia";
+  const hasta = document.getElementById("rep-hasta");
+  if (hasta) hasta.hidden = periodoReporte !== "rango";
+  if (periodoReporte === "dia") diaReporte = "";
+  cargarReporteNube();
+});
+document.getElementById("rep-aplicar")?.addEventListener("click", () => cargarReporteNube());
+document.getElementById("rep-desde")?.addEventListener("change", () => {
+  if (periodoReporte !== "dia") cargarReporteNube();
+});
+document.getElementById("rep-hasta")?.addEventListener("change", () => {
+  if (periodoReporte === "rango") cargarReporteNube();
+});
+
+function cop(n) {
+  return dinero.format(Number(n || 0));
+}
+
+function empresaInforme() {
+  return ultimoEstado?.empresa || {
+    razon_social: "Club Burger",
+    nombre_comercial: "Club Burger",
+    nit: "",
+    responsabilidad_tributaria: "Pendiente de registrar ante la DIAN",
+    actividad_economica: "5611 — Expendio a la mesa de comidas preparadas",
+    representante_legal: "",
+    contador: "",
+    tarjeta_profesional: "",
+    direccion: "",
+    ciudad: "",
+    departamento: "",
+  };
+}
+
+function htmlInforme(data) {
+  const emp = empresaInforme();
+  const nit = emp.nit ? `${emp.nit}${emp.dv ? "-" + emp.dv : ""}` : "Por registrar";
+  const metodos = Object.entries(data.por_metodo || {})
+    .map(([n, v]) => `<tr><td>${esc(n)}</td><td class="num">${cop(v)}</td></tr>`)
+    .join("") || `<tr><td colspan="2">Sin movimientos</td></tr>`;
+  const dias = (data.por_dia || [])
+    .map((d) => `<tr><td>${esc(d.fecha)}</td><td class="num">${d.items || 0}</td><td class="num">${cop(d.total)}</td></tr>`)
+    .join("") || `<tr><td colspan="3">Sin ventas</td></tr>`;
+  const prods = (data.por_producto || [])
+    .map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.nombre)}</td><td class="num">${p.cantidad}</td><td class="num">${cop(p.total)}</td></tr>`)
+    .join("") || `<tr><td colspan="4">Sin productos</td></tr>`;
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Informe de ingresos Club Burger</title>
+  <style>
+    body{margin:0;font:11.5pt/1.45 Palatino,Georgia,serif;color:#1a1a1a;background:#fff}
+    .hoja{max-width:216mm;margin:0 auto;padding:16mm}
+    header{display:flex;justify-content:space-between;border-bottom:3px solid #1f2a44;padding-bottom:10px}
+    h1{font-size:13.5pt;color:#1f2a44;text-transform:uppercase}
+    table{width:100%;border-collapse:collapse;margin:10px 0 16px;font-size:10pt}
+    th,td{border:1px solid #d7d2c8;padding:6px 8px}
+    th{background:#1f2a44;color:#fff;font-size:8.5pt;text-transform:uppercase}
+    .num{text-align:right}
+    .total{background:#1f2a44;color:#fff;padding:12px 14px;display:flex;justify-content:space-between}
+    .letras{background:#f3ead2;padding:8px 12px;margin-bottom:16px}
+    .firmas{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;margin-top:36px;text-align:center;font-size:8.5pt;color:#5b6375}
+    .linea{border-top:1px solid #1f2a44;margin:32px 8px 8px}
+    ol{font-size:9pt}
+    @page{size:letter;margin:12mm}
+  </style></head><body><article class="hoja">
+  <header><div><strong>${esc(emp.nombre_comercial || "Club Burger")}</strong><div>NIT ${esc(nit)}</div></div>
+  <div>${esc(data.etiqueta || "")}</div></header>
+  <h1>Informe auxiliar de ingresos por ventas</h1>
+  <p>Soporte interno del POS para el contador. No es factura electrónica ni documento equivalente ante la DIAN.</p>
+  <div class="total"><span>Total del período</span><b>${cop(data.total)}</b></div>
+  <p class="letras">Período: ${esc(data.desde || "")} a ${esc(data.hasta || "")} · ${esc(data.fuente || "nube")}</p>
+  <h2>Medios de pago</h2><table><thead><tr><th>Medio</th><th>Valor</th></tr></thead><tbody>${metodos}</tbody></table>
+  <h2>Libro diario</h2><table><thead><tr><th>Fecha</th><th>Ítems</th><th>Ingresos</th></tr></thead><tbody>${dias}</tbody></table>
+  <h2>Productos</h2><table><thead><tr><th>#</th><th>Producto</th><th>Cant.</th><th>Ingresos</th></tr></thead><tbody>${prods}</tbody></table>
+  <h2>Notas</h2>
+  <ol>
+    <li>Este informe es un soporte auxiliar del POS. No sustituye la factura electrónica DIAN ni los libros oficiales de comercio.</li>
+    <li>Los valores son ingresos brutos en pesos colombianos. El IVA y demás impuestos se determinan con la facturación electrónica y la responsabilidad tributaria del contribuyente.</li>
+    <li>Úselo como papeles de trabajo para conciliar el POS con la contabilidad y la declaración de renta.</li>
+  </ol>
+  <div class="firmas">
+    <div><div class="linea"></div>Elaboró<br>Sistema POS</div>
+    <div><div class="linea"></div>Representante legal<br>${esc(emp.representante_legal || "Nombre y firma")}</div>
+    <div><div class="linea"></div>Contador público<br>${esc(emp.contador || "Nombre, firma y T.P.")}</div>
+  </div>
+  </article><script>window.onload=()=>window.print()</script></body></html>`;
+}
+
+function csvCelda(v) {
+  const t = String(v ?? "");
+  if (/[",;\n]/.test(t)) return `"${t.replace(/"/g, '""')}"`;
+  return t;
+}
+
+document.getElementById("rep-imprimir")?.addEventListener("click", () => {
+  if (!reporteNube) return;
+  const w = window.open("", "_blank", "noopener,width=900,height=1100");
+  if (!w) return;
+  w.document.write(htmlInforme(reporteNube));
+  w.document.close();
+});
+
+document.getElementById("rep-excel")?.addEventListener("click", () => {
+  if (!reporteNube) return;
+  const data = reporteNube;
+  const lineas = [
+    ["Club Burger", "Informe auxiliar de ingresos por ventas"],
+    ["Período", data.etiqueta || "", data.desde || "", data.hasta || ""],
+    ["Total COP", data.total || 0, "Ítems", data.items || 0],
+    [],
+    ["Medio de pago", "Valor"],
+    ...Object.entries(data.por_metodo || {}).map(([n, v]) => [n, v]),
+    [],
+    ["Fecha", "Ítems", "Líneas", "Ingresos"],
+    ...(data.por_dia || []).map((d) => [d.fecha, d.items, d.lineas, d.total]),
+    [],
+    ["Producto", "Cantidad", "Ingresos"],
+    ...(data.por_producto || []).map((p) => [p.nombre, p.cantidad, p.total]),
+    [],
+    ["Nota", "Soporte auxiliar del POS. No es factura electrónica DIAN ni libro oficial de comercio."],
+  ];
+  const csv = "\uFEFF" + lineas.map((row) => row.map(csvCelda).join(";")).join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  a.download = `ClubBurger_InformeIngresos_${data.desde || ""}_${data.hasta || ""}.csv`;
+  a.click();
 });
 
 (async function inicio() {

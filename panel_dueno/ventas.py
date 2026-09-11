@@ -169,6 +169,14 @@ def registrar_venta(
     finally:
         conn.close()
 
+    try:
+        from nube_sync import _cliente
+        from libro import sincronizar_libro
+
+        sincronizar_libro(_cliente())
+    except Exception:
+        pass
+
     impreso = False
     error_impresion = None
     if imprimir:

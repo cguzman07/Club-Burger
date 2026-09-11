@@ -20,16 +20,18 @@ import qrcode
 import qrcode.image.svg
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
 from auth_pos import autenticar, filtrar_estado
 from snapshot import leer_estado
+from nube_sync import ciclo_nube, nube_activa, url_publica, _cliente
+from informe import EMPRESA_DEFAULT, construir_excel, empresa_desde_config, metadatos_informe, nombre_archivo
+from libro import armar_reporte
 from ticket import _printer_name
 from ventas import METODOS, VentaError, registrar_venta
-from nube_sync import ciclo_nube, nube_activa, url_publica
 
 ROOT = Path(__file__).resolve().parent
 APP_ROOT = ROOT.parent
@@ -94,6 +96,9 @@ def cargar_config() -> dict[str, Any]:
         if "metodos_pago" not in _config:
             _config["metodos_pago"] = list(METODOS)
             guardar_config()
+        if "empresa" not in _config:
+            _config["empresa"] = dict(EMPRESA_DEFAULT)
+            guardar_config()
         return _config
 
     pin = f"{secrets.randbelow(900000) + 100000}"
@@ -106,6 +111,7 @@ def cargar_config() -> dict[str, Any]:
         "iters": PIN_ITERS,
         "stock_minimo": 5,
         "metodos_pago": list(METODOS),
+        "empresa": dict(EMPRESA_DEFAULT),
         "creado": datetime.now().isoformat(timespec="seconds"),
     }
     guardar_config()
@@ -127,6 +133,7 @@ def estado_actual() -> dict[str, Any]:
     data["metodos_pago"] = list(_config.get("metodos_pago") or METODOS)
     data["puede_vender"] = bool(data.get("caja") and data["caja"].get("abierta"))
     data["impresora"] = _printer_name() or None
+    data["empresa"] = empresa_desde_config(cargar_config())
     return data
 
 
@@ -310,6 +317,89 @@ async def vender(request: Request, authorization: str | None = Header(default=No
     return resultado
 
 
+@app.get("/api/reporte")
+async def reporte(
+    authorization: str | None = Header(default=None),
+    periodo: str = "dia",
+    desde: str | None = None,
+    hasta: str | None = None,
+) -> dict[str, Any]:
+    sesion = exigir_sesion(authorization)
+    if not sesion.get("es_admin"):
+        raise HTTPException(status_code=403, detail="Solo el administrador ve reportes.")
+    try:
+        return await asyncio.to_thread(
+            armar_reporte,
+            _cliente() if nube_activa() else None,
+            periodo,
+            desde,
+            hasta,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc
+
+
+def _informe_meta(sesion: dict[str, Any], periodo: str, desde: str | None, hasta: str | None) -> dict[str, Any]:
+    reporte = armar_reporte(
+        _cliente() if nube_activa() else None,
+        periodo,
+        desde,
+        hasta,
+    )
+    empresa = empresa_desde_config(cargar_config())
+    return metadatos_informe(reporte, empresa, str(sesion.get("usuario") or "Administrador"))
+
+
+@app.get("/api/reporte.xlsx")
+async def reporte_excel(
+    authorization: str | None = Header(default=None),
+    periodo: str = "dia",
+    desde: str | None = None,
+    hasta: str | None = None,
+) -> StreamingResponse:
+    sesion = exigir_sesion(authorization)
+    if not sesion.get("es_admin"):
+        raise HTTPException(status_code=403, detail="Solo el administrador exporta reportes.")
+    try:
+        meta = await asyncio.to_thread(_informe_meta, sesion, periodo, desde, hasta)
+        contenido = await asyncio.to_thread(construir_excel, meta)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc
+    nombre = nombre_archivo(meta, "xlsx")
+    return StreamingResponse(
+        iter([contenido]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )
+
+
+@app.get("/api/reporte/imprimir")
+async def reporte_imprimir(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    periodo: str = "dia",
+    desde: str | None = None,
+    hasta: str | None = None,
+    token: str | None = None,
+) -> HTMLResponse:
+    sesion = sesion_de_token(
+        (authorization.split(" ", 1)[1].strip() if authorization and authorization.lower().startswith("bearer ") else None)
+        or token
+    )
+    if not sesion:
+        raise HTTPException(status_code=401, detail="Sesión inválida")
+    if not sesion.get("es_admin"):
+        raise HTTPException(status_code=403, detail="Solo el administrador imprime reportes.")
+    try:
+        meta = await asyncio.to_thread(_informe_meta, sesion, periodo, desde, hasta)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc
+    return templates.TemplateResponse(
+        "informe_print.html",
+        {"request": request, "meta": meta},
+    )
+
+
 @app.get("/api/estado")
 async def estado(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     sesion = exigir_sesion(authorization)
@@ -381,7 +471,7 @@ def imprimir_banner() -> None:
         "  ============================================",
         "   CLUB BURGER  -  PANEL DEL DUENO",
         "  ============================================",
-        "   Deja esta ventana abierta mientras atienden.",
+        "   El panel corre oculto junto al POS. No cierres Club Burger si van a usar el celular.",
         f"   En el celular:  {url}",
         "   Login:          usuario y contraseña del POS",
         "   El celular en el WiFi del local usa esa direccion.",

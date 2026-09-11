@@ -1,44 +1,32 @@
 Club Burger · Nube (Supabase + Netlify)
 ========================================
 
-La caja sigue en el computador (Club Burger.exe + datos_pos.db).
-Supabase guarda una copia en internet. Netlify es la web del dueño
-para entrar desde cualquier lugar.
+La caja del día sigue en el computador (Club Burger.exe + datos_pos.db).
+Supabase guarda el LIBRO DE VENTAS: no se borra aunque borres el .db.
+Desde el celular puedes pedir reporte del día, semana, mes, año o un rango.
 
-1) Supabase
-   - Crea un proyecto en https://supabase.com
+1) Supabase (una sola vez)
    - SQL Editor → pega y ejecuta: nube/supabase/schema.sql
-   - Authentication: el PC crea solo las cuentas del POS (usuario/contraseña).
-     No hace falta un correo del dueño.
+   - Eso crea la tabla libro_ventas y la función reporte_ventas.
    - Settings → API:
        Project URL          → SUPABASE_URL
        anon public          → SUPABASE_ANON_KEY   (Netlify)
        service_role secret  → SUPABASE_SERVICE_KEY (solo el PC)
 
 2) Computador del restaurante
-   - Abre local.env en la raíz del proyecto (Club Burger/local.env)
-   - Pega SUPABASE_URL y SUPABASE_SERVICE_KEY
-   - Cuando tengas la web: PANEL_PUBLICO_URL=https://tu-sitio.netlify.app
-   - Abre "Iniciar Panel Dueño.bat" y déjalo abierto
-   - En la consola debe decir: Nube: conectada
+   - local.env junto al .exe con SUPABASE_URL y SUPABASE_SERVICE_KEY
+   - Abre Club Burger.exe; el panel arranca solo y sube cada venta al libro.
+   - Si no hay internet, se vende igual. Al volver, se sincroniza.
+   - Borrar datos_pos.db ya no borra el historial de la nube.
 
-3) Netlify
-   - Sube este proyecto a GitHub (o arrastra la carpeta nube/web)
-   - New site from Git → este repositorio
-   - Build: ya está en netlify.toml (publica nube/web)
-   - Site settings → Environment variables:
-       SUPABASE_URL
-       SUPABASE_ANON_KEY
-   - Deploy
-   - El administrador y los cajeros entran con el usuario y contraseña del POS
+3) Reportes e informes para el contador
+   - Panel local o https://clubburger.app → pestaña Reporte (solo admin)
+   - Hoy / Semana / Mes / Año / Rango de fechas
+   - Exportar Excel (hojas: carátula, resumen, medios de pago, diario, productos, marco legal)
+   - Imprimir / PDF en tamaño carta, con firmas y consecutivo
+   - Complete NIT y datos en panel_dueno/config.json → empresa
+   - El informe es soporte auxiliar del POS; no reemplaza la factura electrónica DIAN
 
-4) Uso diario
-   PC: Club Burger.exe (cajeros, usuarios, caja, inventario)
-       + Iniciar Panel Dueño.bat (sube datos e imprime pedidos)
-   Celular en el local: QR + usuario/contraseña del POS
-   Celular desde cualquier parte: web de Netlify + las mismas credenciales
-   Admin: caja, inventario, vender y reporte diario
-   Cajero: caja en vivo, inventario y facturar (sin reporte de cierre)
-
-Si se cae internet, el mostrador sigue vendiendo. Al volver, se sincroniza.
-El ticket remoto solo sale si el PC está encendido con el panel.
+4) Netlify
+   - Build ya está en netlify.toml (publica nube/web)
+   - Variables: SUPABASE_URL y SUPABASE_ANON_KEY

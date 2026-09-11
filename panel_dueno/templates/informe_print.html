@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>{{ meta.consecutivo }} · Informe de ingresos Club Burger</title>
+  <style>
+    :root { --navy: #1f2a44; --gold: #c4a35a; --ink: #1a1a1a; --muted: #5b6375; --line: #d7d2c8; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font: 11.5pt/1.45 "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+      background: #e8e4dc;
+    }
+    .hoja {
+      width: 216mm;
+      min-height: 279mm;
+      margin: 12px auto;
+      padding: 16mm 16mm 18mm;
+      background: #fff;
+      box-shadow: 0 8px 30px rgba(31, 42, 68, 0.12);
+    }
+    header { display: flex; justify-content: space-between; gap: 16px; border-bottom: 3px solid var(--navy); padding-bottom: 10px; }
+    .marca strong { display: block; font-size: 18pt; letter-spacing: 0.02em; color: var(--navy); }
+    .marca span { color: var(--muted); font-size: 9pt; }
+    .folio { text-align: right; font-size: 9pt; color: var(--muted); }
+    .folio b { display: block; color: var(--navy); font-size: 12pt; }
+    h1 { font-size: 13.5pt; margin: 16px 0 4px; color: var(--navy); text-transform: uppercase; letter-spacing: 0.04em; }
+    .sub { margin: 0 0 14px; color: var(--muted); font-size: 9.5pt; }
+    table { width: 100%; border-collapse: collapse; margin: 10px 0 16px; font-size: 10pt; }
+    th, td { border: 1px solid var(--line); padding: 6px 8px; vertical-align: top; }
+    th { background: var(--navy); color: #fff; font-weight: 600; font-family: "Segoe UI", Calibri, sans-serif; font-size: 8.5pt; letter-spacing: 0.06em; text-transform: uppercase; }
+    td.k { width: 34%; background: #f7f4ee; font-family: "Segoe UI", sans-serif; font-size: 9pt; color: var(--navy); }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .total {
+      background: var(--navy);
+      color: #fff;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+    }
+    .total b { font-size: 16pt; }
+    .letras { background: #f3ead2; border: 1px solid var(--gold); padding: 8px 12px; margin: 0 0 16px; font-size: 9.5pt; }
+    .aviso { background: #f8e6c8; border: 1px solid #c4a35a; padding: 8px 12px; margin-bottom: 14px; font-size: 9.5pt; }
+    h2 { font-size: 11pt; color: var(--navy); margin: 18px 0 6px; border-bottom: 1px solid var(--gold); padding-bottom: 4px; }
+    ol.legal { padding-left: 18px; font-size: 9pt; color: #333; }
+    ol.legal li { margin-bottom: 8px; }
+    .firmas { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; margin-top: 28px; }
+    .firmas p { margin: 0; font-size: 8.5pt; color: var(--muted); text-align: center; }
+    .linea { border-top: 1px solid var(--navy); margin: 36px 8px 8px; }
+    footer { margin-top: 22px; font-size: 8pt; color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; }
+    .no-print { text-align: center; padding: 12px; }
+    .no-print button {
+      font: 650 12pt "Segoe UI", sans-serif;
+      background: var(--navy);
+      color: #fff;
+      border: 0;
+      padding: 10px 18px;
+      border-radius: 8px;
+      margin: 0 6px;
+      cursor: pointer;
+    }
+    @media print {
+      body { background: #fff; }
+      .hoja { margin: 0; box-shadow: none; width: auto; min-height: 0; padding: 12mm; }
+      .no-print { display: none; }
+      h2 { page-break-after: avoid; }
+      table, .firmas { page-break-inside: avoid; }
+    }
+    @page { size: letter; margin: 12mm; }
+  </style>
+</head>
+<body>
+  <div class="no-print">
+    <button type="button" onclick="window.print()">Imprimir / Guardar PDF</button>
+    <button type="button" onclick="window.close()">Cerrar</button>
+  </div>
+  <article class="hoja">
+    <header>
+      <div class="marca">
+        <strong>{{ meta.empresa.nombre_comercial }}</strong>
+        <span>{{ meta.empresa.razon_social }} · NIT {{ meta.nit }}</span>
+      </div>
+      <div class="folio">
+        <b>{{ meta.consecutivo }}</b>
+        {{ meta.ciudad_fecha }}
+      </div>
+    </header>
+    <h1>{{ meta.titulo }}</h1>
+    <p class="sub">Soporte auxiliar del sistema de punto de venta para el contador del negocio. No es factura electrónica ni documento equivalente ante la DIAN.</p>
+    {% if meta.nit_pendiente %}
+    <p class="aviso">Registre el NIT en la configuración del negocio (empresa.nit) antes de entregar este informe al contador.</p>
+    {% endif %}
+    <table>
+      <tr><td class="k">Período</td><td>{{ meta.etiqueta }}</td></tr>
+      <tr><td class="k">Desde / hasta</td><td>{{ meta.desde_latino }} — {{ meta.hasta_latino }}</td></tr>
+      <tr><td class="k">Dirección</td><td>{{ meta.empresa.direccion or "—" }} · {{ meta.empresa.ciudad }} {{ meta.empresa.departamento }}</td></tr>
+      <tr><td class="k">Responsabilidad tributaria</td><td>{{ meta.empresa.responsabilidad_tributaria }}</td></tr>
+      <tr><td class="k">Actividad económica</td><td>{{ meta.empresa.actividad_economica }}</td></tr>
+      <tr><td class="k">Fuente / moneda</td><td>{{ meta.fuente }} · {{ meta.moneda }}</td></tr>
+      <tr><td class="k">Generado</td><td>{{ meta.generado }} (America/Bogota) · {{ meta.usuario }}</td></tr>
+      <tr><td class="k">Huella SHA-256</td><td style="font-size:8pt;word-break:break-all">{{ meta.huella }}</td></tr>
+    </table>
+    <div class="total">
+      <span>Total ingresos del período</span>
+      <b>{{ "{:,.0f}".format(meta.total).replace(",", ".") }}</b>
+    </div>
+    <p class="letras"><strong>Valor en letras:</strong> {{ meta.total_letras }}</p>
+
+    <h2>1. Resumen</h2>
+    <table>
+      <thead><tr><th>Concepto</th><th>Cantidad</th><th>Valor (COP)</th></tr></thead>
+      <tbody>
+        <tr><td>Ítems vendidos</td><td class="num">{{ meta.items }}</td><td class="num">{{ "{:,.0f}".format(meta.total).replace(",", ".") }}</td></tr>
+        <tr><td>Líneas de venta</td><td class="num">{{ meta.lineas }}</td><td class="num">—</td></tr>
+        <tr><td>Efectivo</td><td class="num">—</td><td class="num">{{ "{:,.0f}".format(meta.efectivo).replace(",", ".") }}</td></tr>
+        <tr><td>Nequi, transferencias y otros</td><td class="num">—</td><td class="num">{{ "{:,.0f}".format(meta.otros_medios).replace(",", ".") }}</td></tr>
+      </tbody>
+    </table>
+
+    <h2>2. Medios de pago</h2>
+    <table>
+      <thead><tr><th>Medio</th><th>Valor (COP)</th></tr></thead>
+      <tbody>
+        {% for nombre, valor in meta.por_metodo.items() %}
+        <tr><td>{{ nombre }}</td><td class="num">{{ "{:,.0f}".format(valor).replace(",", ".") }}</td></tr>
+        {% else %}
+        <tr><td colspan="2">Sin movimientos</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h2>3. Libro diario de ingresos</h2>
+    <table>
+      <thead><tr><th>Fecha</th><th>Ítems</th><th>Líneas</th><th>Ingresos (COP)</th></tr></thead>
+      <tbody>
+        {% for d in meta.por_dia %}
+        <tr>
+          <td>{{ d.fecha[8:10] }}/{{ d.fecha[5:7] }}/{{ d.fecha[0:4] }}</td>
+          <td class="num">{{ d.items }}</td>
+          <td class="num">{{ d.lineas }}</td>
+          <td class="num">{{ "{:,.0f}".format(d.total).replace(",", ".") }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4">Sin ventas en el período</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h2>4. Productos</h2>
+    <table>
+      <thead><tr><th>#</th><th>Producto</th><th>Cantidad</th><th>Ingresos (COP)</th></tr></thead>
+      <tbody>
+        {% for p in meta.por_producto %}
+        <tr>
+          <td class="num">{{ loop.index }}</td>
+          <td>{{ p.nombre }}</td>
+          <td class="num">{{ p.cantidad }}</td>
+          <td class="num">{{ "{:,.0f}".format(p.total).replace(",", ".") }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4">Sin productos</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h2>5. Notas para el contador</h2>
+    <ol class="legal">
+      {% for nota in meta.marco_legal %}
+      <li>{{ nota }}</li>
+      {% endfor %}
+    </ol>
+
+    <div class="firmas">
+      <div>
+        <div class="linea"></div>
+        <p>Elaboró<br>{{ meta.usuario }}<br>Sistema POS Club Burger</p>
+      </div>
+      <div>
+        <div class="linea"></div>
+        <p>Representante legal<br>{{ meta.empresa.representante_legal or "Nombre y firma" }}<br>C.C. / NIT</p>
+      </div>
+      <div>
+        <div class="linea"></div>
+        <p>Contador público<br>{{ meta.empresa.contador or "Nombre, firma y T.P." }}<br>{{ meta.empresa.tarjeta_profesional or "Tarjeta profesional" }}</p>
+      </div>
+    </div>
+    <footer>
+      {{ meta.consecutivo }} · Conserve este ejemplar junto con la facturación electrónica DIAN · Página impresa desde Club Burger POS
+    </footer>
+  </article>
+</body>
+</html>

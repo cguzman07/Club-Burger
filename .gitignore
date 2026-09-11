@@ -4,9 +4,13 @@ panel_dueno/nube.env
 panel_dueno/local.env
 panel_dueno/nube_state.json
 panel_dueno/config.json
+panel_dueno/panel.log
 local.env
 nube/web/config.js
 __pycache__/
 *.pyc
 .DS_Store
 
+
+panel_dueno/informes_emitidos.json
+datos_pos.db
